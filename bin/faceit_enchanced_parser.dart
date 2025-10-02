@@ -4,9 +4,11 @@ import 'package:dotenv/dotenv.dart';
 import 'package:logger/logger.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'package:path/path.dart';
-import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'package:args/args.dart';
+import 'export_complete_data_json.dart';
+import 'reliable_http_get.dart';
+import 'create_db.dart';
 
 // Глобальные переменные
 String outputPrefix = 'faceit';
@@ -133,7 +135,9 @@ void main(List<String> arguments) async {
     db = await openDatabase(
       path,
       version: 1,
-      onCreate: _createDb,
+      onCreate: (db, version) {
+        createDb(db, version);
+      },
     );
 
     logger.i('Database initialized at $path');
@@ -141,20 +145,11 @@ void main(List<String> arguments) async {
     // Создаем имена файлов с учетом префикса, временной метки и диапазона игроков
     final rangeStamp = '_${startPlayerIndex}_$endPlayerIndex';
 
-    final playerStatsFile =
-        '${outputPrefix}_player_stats$dateTimeStamp$rangeStamp.csv';
-    final mapStatsFile =
-        '${outputPrefix}_map_stats$dateTimeStamp$rangeStamp.csv';
-    final teammatesFile =
-        '${outputPrefix}_teammates$dateTimeStamp$rangeStamp.csv';
     final completeDataFile =
         '${outputPrefix}_complete_data$dateTimeStamp$rangeStamp.json';
 
     // Вызываем функции экспорта с новыми именами файлов
-    await exportDataForML(playerStatsFile);
-    await exportMapStatsForML(mapStatsFile);
-    await exportTeammatesWithStatsForML(teammatesFile);
-    await exportCompleteDataToJson(completeDataFile);
+    await exportCompleteDataToJson(completeDataFile, logger, db);
     // Закрываем базу данных
     await db.close();
     logger.i('Data collection completed');
@@ -162,229 +157,6 @@ void main(List<String> arguments) async {
     logger.e('Fatal error during execution', error: e, stackTrace: stackTrace);
     exit(1);
   }
-}
-
-// Функция для надежного выполнения HTTP-запросов с повторными попытками
-Future<http.Response> reliableHttpGet(
-  Uri url, {
-  required Map<String, String> headers,
-  int maxRetries = 5,
-  int initialDelayMs = 1000,
-}) async {
-  int retryCount = 0;
-  int delayMs = initialDelayMs;
-
-  while (true) {
-    try {
-      // Попытка выполнить запрос с увеличенным таймаутом
-      final response = await http.get(url, headers: headers).timeout(
-        const Duration(seconds: 30), // Увеличиваем таймаут до 30 секунд
-        onTimeout: () {
-          throw TimeoutException('Request timed out after 30 seconds');
-        },
-      );
-
-      // Проверяем коды ответа для определения необходимости повторных попыток
-      if (response.statusCode == 429) {
-        // Too Many Requests
-        logger.w('Rate limited by FACEIT API, will retry');
-        throw Exception('Rate limited');
-      }
-
-      return response; // Успешный запрос
-    } catch (e) {
-      retryCount++;
-
-      if (retryCount > maxRetries) {
-        logger.e('Failed after $maxRetries retries: $e');
-        rethrow; // Больше не пытаемся, пробрасываем ошибку
-      }
-
-      // Экспоненциальное увеличение задержки между попытками
-      logger.w('Request failed (attempt $retryCount/$maxRetries): $e');
-      logger.i('Retrying in ${delayMs}ms...');
-
-      await Future.delayed(Duration(milliseconds: delayMs));
-      delayMs *= 2; // Экспоненциальный рост задержки
-    }
-  }
-}
-
-// Создание структуры базы данных
-Future<void> _createDb(Database db, int version) async {
-  // Таблица для топ игроков
-  await db.execute('''
-    CREATE TABLE players (
-      player_id TEXT PRIMARY KEY,
-      nickname TEXT NOT NULL,
-      skill_level INTEGER,
-      faceit_elo INTEGER,
-      country TEXT,
-      processed BOOLEAN DEFAULT 0
-    )
-  ''');
-
-  // Таблица для статистики игроков
-  await db.execute('''
-  CREATE TABLE player_stats (
-    player_id TEXT PRIMARY KEY,
-    kd_ratio REAL,
-    kr_ratio REAL,
-    adr REAL,
-    sniper_kill_rate_per_round REAL,
-    sniper_kill_rate_per_match REAL,
-    v1_count INTEGER,
-    v2_count INTEGER,
-    match_1v1_win_rate REAL,
-    match_1v2_win_rate REAL,
-    utility_damage_success_rate REAL,
-    utility_damage_per_round REAL,
-    utility_damage INTEGER,
-    utility_usage_per_round REAL,
-    enemies_flashed_per_round REAL,
-    flashes_per_round REAL,
-    flash_success_rate REAL,
-    flash_successes INTEGER,
-    flash_count INTEGER,
-    entry_wins INTEGER,
-    match_entry_rate REAL,
-    match_entry_success_rate REAL,
-    entry_count INTEGER,
-    current_win_streak INTEGER,
-    total_damage INTEGER,
-    total_utility_successes INTEGER,
-    total_headshots_percentage INTEGER,
-    average_headshots_percentage REAL,
-    matches INTEGER,
-    wins INTEGER,
-    total_rounds INTEGER,
-    win_rate_percentage INTEGER,
-    total_matches INTEGER,
-    longest_win_streak INTEGER,
-    total_1v1_wins INTEGER,
-    total_1v2_wins INTEGER,
-    total_utility_count INTEGER,
-    total_kills INTEGER,
-    total_sniper_kills INTEGER,
-    utility_success_rate REAL,
-    total_enemies_flashed INTEGER,
-    FOREIGN KEY (player_id) REFERENCES players (player_id)
-  )
-''');
-
-// Таблица для статистики игроков по картам
-  await db.execute('''
-  CREATE TABLE player_map_stats (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    player_id TEXT,
-    map_name TEXT,
-    kd_ratio REAL,
-    kr_ratio REAL,
-    adr REAL,
-    sniper_kill_rate_per_round REAL,
-    sniper_kill_rate_per_match REAL,
-    v1_count INTEGER,
-    v2_count INTEGER,
-    match_1v1_win_rate REAL,
-    match_1v2_win_rate REAL,
-    utility_damage_success_rate REAL,
-    utility_damage_per_round REAL,
-    utility_damage INTEGER,
-    utility_usage_per_round REAL,
-    enemies_flashed_per_round REAL,
-    flashes_per_round REAL,
-    flash_success_rate REAL,
-    flash_successes INTEGER,
-    flash_count INTEGER,
-    entry_wins INTEGER,
-    match_entry_rate REAL,
-    match_entry_success_rate REAL,
-    entry_count INTEGER,
-    total_damage INTEGER,
-    total_utility_successes INTEGER,
-    total_headshots_percentage INTEGER,
-    average_headshots_percentage REAL,
-    matches INTEGER,
-    wins INTEGER,
-    total_rounds INTEGER,
-    win_rate_percentage INTEGER,
-    total_1v1_wins INTEGER,
-    total_1v2_wins INTEGER,
-    total_utility_count INTEGER,
-    total_kills INTEGER,
-    total_sniper_kills INTEGER,
-    utility_success_rate REAL,
-    total_enemies_flashed INTEGER,
-    average_kills REAL,
-    average_deaths REAL,
-    headshots INTEGER,
-    assists INTEGER,
-    deaths INTEGER,
-    average_assists REAL,
-    average_triple_kills REAL,
-    average_quadro_kills REAL,
-    average_penta_kills REAL,
-    average_mvps REAL,
-    triple_kills INTEGER,
-    quadro_kills INTEGER,
-    penta_kills INTEGER,
-    mvps INTEGER,
-    headshots_per_match REAL,
-    rounds INTEGER,
-    kills INTEGER,
-    FOREIGN KEY (player_id) REFERENCES players (player_id)
-  )
-''');
-
-  // Таблица для матчей
-  await db.execute('''
-    CREATE TABLE matches (
-      match_id TEXT PRIMARY KEY,
-      game_mode TEXT,
-      map TEXT,
-      region TEXT,
-      date INTEGER,
-      score_faction1 INTEGER,
-      score_faction2 INTEGER
-    )
-  ''');
-
-  // Таблица для участия игроков в матчах
-  await db.execute('''
-    CREATE TABLE player_matches (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      player_id TEXT,
-      match_id TEXT,
-      team TEXT,
-      result INTEGER, /* 1=win, 0=loss */
-      FOREIGN KEY (player_id) REFERENCES players (player_id),
-      FOREIGN KEY (match_id) REFERENCES matches (match_id)
-    )
-  ''');
-
-  // Таблица для отношений между игроками (тиммейты)
-  await db.execute('''
-    CREATE TABLE teammates (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      player_id TEXT,
-      teammate_id TEXT,
-      matches_together INTEGER DEFAULT 0,
-      wins_together INTEGER DEFAULT 0,
-      FOREIGN KEY (player_id) REFERENCES players (player_id),
-      FOREIGN KEY (teammate_id) REFERENCES players (player_id)
-    )
-  ''');
-
-  // Индексы для ускорения запросов
-  await db.execute(
-      'CREATE INDEX idx_player_matches_player ON player_matches(player_id)');
-  await db.execute(
-      'CREATE INDEX idx_player_matches_match ON player_matches(match_id)');
-  await db.execute(
-      'CREATE INDEX idx_player_map_stats ON player_map_stats(player_id, map_name)');
-  await db.execute('CREATE INDEX idx_teammates_player ON teammates(player_id)');
-  await db
-      .execute('CREATE INDEX idx_teammates_teammate ON teammates(teammate_id)');
 }
 
 // Основной процесс сбора данных
@@ -472,9 +244,13 @@ Future<void> fetchTopPlayers() async {
 
       final url =
           'https://open.faceit.com/data/v4/rankings/games/cs2/regions/EU?offset=$offset&limit=$currentLimit';
-      final response = await reliableHttpGet(Uri.parse(url), headers: {
-        'Authorization': 'Bearer $apiKey',
-      });
+      final response = await reliableHttpGet(
+        Uri.parse(url),
+        headers: {
+          'Authorization': 'Bearer $apiKey',
+        },
+        logger: logger,
+      );
 
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
@@ -554,9 +330,13 @@ Future<int> fetchPlayerMatches(String playerId) async {
 
       final url =
           'https://open.faceit.com/data/v4/players/$playerId/history?game=cs2&offset=$offset&limit=$currentLimit';
-      final response = await reliableHttpGet(Uri.parse(url), headers: {
-        'Authorization': 'Bearer $apiKey',
-      });
+      final response = await reliableHttpGet(
+        Uri.parse(url),
+        headers: {
+          'Authorization': 'Bearer $apiKey',
+        },
+        logger: logger,
+      );
 
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
@@ -671,9 +451,13 @@ Future<void> fetchPlayerStats(String playerId) async {
 
   try {
     final url = 'https://open.faceit.com/data/v4/players/$playerId/stats/cs2';
-    final response = await reliableHttpGet(Uri.parse(url), headers: {
-      'Authorization': 'Bearer $apiKey',
-    });
+    final response = await reliableHttpGet(
+      Uri.parse(url),
+      headers: {
+        'Authorization': 'Bearer $apiKey',
+      },
+      logger: logger,
+    );
 
     if (response.statusCode == 200) {
       final data = jsonDecode(response.body);
@@ -1023,377 +807,4 @@ Future<void> processTeammates(String playerId) async {
   }
 
   logger.i('Processed teammates for player $playerId');
-}
-
-Future<void> exportDataForML(String outputPath) async {
-  logger
-      .i('Exporting complete player data for machine learning to $outputPath');
-
-  final file = File(outputPath);
-  final sink = file.openWrite();
-
-  // Полный заголовок CSV файла, включающий все поля
-  sink.writeln('player_id,nickname,'
-      'kd_ratio,kr_ratio,adr,'
-      'sniper_kill_rate_per_round,sniper_kill_rate_per_match,total_sniper_kills,'
-      'v1_count,v2_count,match_1v1_win_rate,match_1v2_win_rate,total_1v1_wins,total_1v2_wins,'
-      'utility_damage_success_rate,utility_damage_per_round,utility_damage,utility_usage_per_round,'
-      'utility_success_rate,total_utility_successes,total_utility_count,'
-      'enemies_flashed_per_round,flashes_per_round,flash_success_rate,flash_successes,flash_count,total_enemies_flashed,'
-      'entry_wins,match_entry_rate,match_entry_success_rate,entry_count,'
-      'current_win_streak,total_damage,total_headshots_percentage,average_headshots_percentage,'
-      'matches,wins,total_rounds,win_rate_percentage,total_matches,longest_win_streak,total_kills');
-
-  // Получаем всех игроков со статистикой
-  final results = await db.rawQuery('''
-    SELECT p.player_id, p.nickname, s.*
-    FROM players p
-    JOIN player_stats s ON p.player_id = s.player_id
-    WHERE p.processed = 1
-  ''');
-
-  for (final row in results) {
-    sink.writeln('${row['player_id']},${row['nickname']},'
-        '${row['kd_ratio']},${row['kr_ratio']},${row['adr']},'
-        '${row['sniper_kill_rate_per_round']},${row['sniper_kill_rate_per_match']},${row['total_sniper_kills']},'
-        '${row['v1_count']},${row['v2_count']},${row['match_1v1_win_rate']},${row['match_1v2_win_rate']},'
-        '${row['total_1v1_wins']},${row['total_1v2_wins']},'
-        '${row['utility_damage_success_rate']},${row['utility_damage_per_round']},${row['utility_damage']},'
-        '${row['utility_usage_per_round']},${row['utility_success_rate']},${row['total_utility_successes']},'
-        '${row['total_utility_count']},'
-        '${row['enemies_flashed_per_round']},${row['flashes_per_round']},${row['flash_success_rate']},'
-        '${row['flash_successes']},${row['flash_count']},${row['total_enemies_flashed']},'
-        '${row['entry_wins']},${row['match_entry_rate']},${row['match_entry_success_rate']},${row['entry_count']},'
-        '${row['current_win_streak']},${row['total_damage']},${row['total_headshots_percentage']},'
-        '${row['average_headshots_percentage']},${row['matches']},${row['wins']},${row['total_rounds']},'
-        '${row['win_rate_percentage']},${row['total_matches']},${row['longest_win_streak']},${row['total_kills']}');
-  }
-
-  await sink.close();
-  logger.i('Exported ${results.length} complete player records to $outputPath');
-}
-
-Future<void> exportTeammatesWithStatsForML(String outputPath) async {
-  logger.i('Exporting complete teammates data to $outputPath');
-
-  final file = File(outputPath);
-  final sink = file.openWrite();
-
-  // Полный заголовок CSV файла, включающий все поля статистики тиммейтов
-  sink.writeln(
-      'player_id,player_nickname,teammate_id,teammate_nickname,matches_together,wins_together,win_rate,'
-      'teammate_kd_ratio,teammate_kr_ratio,teammate_adr,'
-      'teammate_sniper_kill_rate_per_round,teammate_sniper_kill_rate_per_match,teammate_total_sniper_kills,'
-      'teammate_v1_count,teammate_v2_count,teammate_match_1v1_win_rate,teammate_match_1v2_win_rate,'
-      'teammate_total_1v1_wins,teammate_total_1v2_wins,'
-      'teammate_utility_damage_success_rate,teammate_utility_damage_per_round,teammate_utility_damage,'
-      'teammate_utility_usage_per_round,teammate_utility_success_rate,teammate_total_utility_successes,'
-      'teammate_total_utility_count,'
-      'teammate_enemies_flashed_per_round,teammate_flashes_per_round,teammate_flash_success_rate,'
-      'teammate_flash_successes,teammate_flash_count,teammate_total_enemies_flashed,'
-      'teammate_entry_wins,teammate_match_entry_rate,teammate_match_entry_success_rate,teammate_entry_count,'
-      'teammate_current_win_streak,teammate_total_damage,teammate_total_headshots_percentage,'
-      'teammate_average_headshots_percentage,teammate_matches,teammate_wins,teammate_total_rounds,'
-      'teammate_win_rate_percentage,teammate_total_matches,teammate_longest_win_streak,teammate_total_kills');
-
-  // Полный SQL запрос, включающий все поля статистики
-  final results = await db.rawQuery('''
-    SELECT 
-      t.player_id, 
-      p1.nickname as player_nickname, 
-      t.teammate_id, 
-      p2.nickname as teammate_nickname, 
-      t.matches_together, 
-      t.wins_together,
-      (t.wins_together * 1.0 / t.matches_together) as win_rate,
-      s.kd_ratio as teammate_kd_ratio,
-      s.kr_ratio as teammate_kr_ratio,
-      s.adr as teammate_adr,
-      s.sniper_kill_rate_per_round as teammate_sniper_kill_rate_per_round,
-      s.sniper_kill_rate_per_match as teammate_sniper_kill_rate_per_match,
-      s.total_sniper_kills as teammate_total_sniper_kills,
-      s.v1_count as teammate_v1_count,
-      s.v2_count as teammate_v2_count,
-      s.match_1v1_win_rate as teammate_match_1v1_win_rate,
-      s.match_1v2_win_rate as teammate_match_1v2_win_rate,
-      s.total_1v1_wins as teammate_total_1v1_wins,
-      s.total_1v2_wins as teammate_total_1v2_wins,
-      s.utility_damage_success_rate as teammate_utility_damage_success_rate,
-      s.utility_damage_per_round as teammate_utility_damage_per_round,
-      s.utility_damage as teammate_utility_damage,
-      s.utility_usage_per_round as teammate_utility_usage_per_round,
-      s.utility_success_rate as teammate_utility_success_rate,
-      s.total_utility_successes as teammate_total_utility_successes,
-      s.total_utility_count as teammate_total_utility_count,
-      s.enemies_flashed_per_round as teammate_enemies_flashed_per_round,
-      s.flashes_per_round as teammate_flashes_per_round,
-      s.flash_success_rate as teammate_flash_success_rate,
-      s.flash_successes as teammate_flash_successes,
-      s.flash_count as teammate_flash_count,
-      s.total_enemies_flashed as teammate_total_enemies_flashed,
-      s.entry_wins as teammate_entry_wins,
-      s.match_entry_rate as teammate_match_entry_rate,
-      s.match_entry_success_rate as teammate_match_entry_success_rate,
-      s.entry_count as teammate_entry_count,
-      s.current_win_streak as teammate_current_win_streak,
-      s.total_damage as teammate_total_damage,
-      s.total_headshots_percentage as teammate_total_headshots_percentage,
-      s.average_headshots_percentage as teammate_average_headshots_percentage,
-      s.matches as teammate_matches,
-      s.wins as teammate_wins,
-      s.total_rounds as teammate_total_rounds,
-      s.win_rate_percentage as teammate_win_rate_percentage,
-      s.total_matches as teammate_total_matches,
-      s.longest_win_streak as teammate_longest_win_streak,
-      s.total_kills as teammate_total_kills
-    FROM teammates t
-    JOIN players p1 ON t.player_id = p1.player_id
-    JOIN players p2 ON t.teammate_id = p2.player_id
-    LEFT JOIN player_stats s ON t.teammate_id = s.player_id
-    ORDER BY t.player_id, win_rate DESC
-  ''');
-
-  // Вывод всех полей в CSV
-  for (final row in results) {
-    sink.writeln('${row['player_id'] ?? ''},'
-        '${row['player_nickname'] ?? ''},'
-        '${row['teammate_id'] ?? ''},'
-        '${row['teammate_nickname'] ?? ''},'
-        '${row['matches_together'] ?? ''},'
-        '${row['wins_together'] ?? ''},'
-        '${row['win_rate'] ?? ''},'
-        '${row['teammate_kd_ratio'] ?? ''},'
-        '${row['teammate_kr_ratio'] ?? ''},'
-        '${row['teammate_adr'] ?? ''},'
-        '${row['teammate_sniper_kill_rate_per_round'] ?? ''},'
-        '${row['teammate_sniper_kill_rate_per_match'] ?? ''},'
-        '${row['teammate_total_sniper_kills'] ?? ''},'
-        '${row['teammate_v1_count'] ?? ''},'
-        '${row['teammate_v2_count'] ?? ''},'
-        '${row['teammate_match_1v1_win_rate'] ?? ''},'
-        '${row['teammate_match_1v2_win_rate'] ?? ''},'
-        '${row['teammate_total_1v1_wins'] ?? ''},'
-        '${row['teammate_total_1v2_wins'] ?? ''},'
-        '${row['teammate_utility_damage_success_rate'] ?? ''},'
-        '${row['teammate_utility_damage_per_round'] ?? ''},'
-        '${row['teammate_utility_damage'] ?? ''},'
-        '${row['teammate_utility_usage_per_round'] ?? ''},'
-        '${row['teammate_utility_success_rate'] ?? ''},'
-        '${row['teammate_total_utility_successes'] ?? ''},'
-        '${row['teammate_total_utility_count'] ?? ''},'
-        '${row['teammate_enemies_flashed_per_round'] ?? ''},'
-        '${row['teammate_flashes_per_round'] ?? ''},'
-        '${row['teammate_flash_success_rate'] ?? ''},'
-        '${row['teammate_flash_successes'] ?? ''},'
-        '${row['teammate_flash_count'] ?? ''},'
-        '${row['teammate_total_enemies_flashed'] ?? ''},'
-        '${row['teammate_entry_wins'] ?? ''},'
-        '${row['teammate_match_entry_rate'] ?? ''},'
-        '${row['teammate_match_entry_success_rate'] ?? ''},'
-        '${row['teammate_entry_count'] ?? ''},'
-        '${row['teammate_current_win_streak'] ?? ''},'
-        '${row['teammate_total_damage'] ?? ''},'
-        '${row['teammate_total_headshots_percentage'] ?? ''},'
-        '${row['teammate_average_headshots_percentage'] ?? ''},'
-        '${row['teammate_matches'] ?? ''},'
-        '${row['teammate_wins'] ?? ''},'
-        '${row['teammate_total_rounds'] ?? ''},'
-        '${row['teammate_win_rate_percentage'] ?? ''},'
-        '${row['teammate_total_matches'] ?? ''},'
-        '${row['teammate_longest_win_streak'] ?? ''},'
-        '${row['teammate_total_kills'] ?? ''}');
-  }
-
-  await sink.close();
-  logger
-      .i('Exported ${results.length} complete teammate records to $outputPath');
-}
-
-// Добавьте новую функцию:
-
-Future<void> exportMapStatsForML(String outputPath) async {
-  logger.i('Exporting player map stats for machine learning to $outputPath');
-
-  final file = File(outputPath);
-  final sink = file.openWrite();
-
-  // Полный заголовок CSV файла для статистики по картам
-  sink.writeln('player_id,nickname,map_name,'
-      'kd_ratio,kr_ratio,adr,'
-      'sniper_kill_rate_per_round,sniper_kill_rate_per_match,total_sniper_kills,'
-      'v1_count,v2_count,match_1v1_win_rate,match_1v2_win_rate,total_1v1_wins,total_1v2_wins,'
-      'utility_damage_success_rate,utility_damage_per_round,utility_damage,utility_usage_per_round,'
-      'utility_success_rate,total_utility_successes,total_utility_count,'
-      'enemies_flashed_per_round,flashes_per_round,flash_success_rate,flash_successes,flash_count,total_enemies_flashed,'
-      'entry_wins,match_entry_rate,match_entry_success_rate,entry_count,'
-      'total_damage,total_headshots_percentage,average_headshots_percentage,'
-      'matches,wins,total_rounds,win_rate_percentage,total_kills,'
-      'average_kills,average_deaths,average_assists,headshots,assists,deaths,kills,rounds,'
-      'triple_kills,quadro_kills,penta_kills,average_triple_kills,average_quadro_kills,average_penta_kills,'
-      'mvps,average_mvps,headshots_per_match');
-
-  // Получаем все данные по картам для всех обработанных игроков
-  final results = await db.rawQuery('''
-    SELECT p.player_id, p.nickname, ms.*
-    FROM players p
-    JOIN player_map_stats ms ON p.player_id = ms.player_id
-    WHERE p.processed = 1
-    ORDER BY p.player_id, ms.map_name
-  ''');
-
-  for (final row in results) {
-    sink.writeln('${row['player_id']},${row['nickname']},${row['map_name']},'
-        '${row['kd_ratio']},${row['kr_ratio']},${row['adr']},'
-        '${row['sniper_kill_rate_per_round']},${row['sniper_kill_rate_per_match']},${row['total_sniper_kills']},'
-        '${row['v1_count']},${row['v2_count']},${row['match_1v1_win_rate']},${row['match_1v2_win_rate']},'
-        '${row['total_1v1_wins']},${row['total_1v2_wins']},'
-        '${row['utility_damage_success_rate']},${row['utility_damage_per_round']},${row['utility_damage']},'
-        '${row['utility_usage_per_round']},${row['utility_success_rate']},${row['total_utility_successes']},'
-        '${row['total_utility_count']},'
-        '${row['enemies_flashed_per_round']},${row['flashes_per_round']},${row['flash_success_rate']},'
-        '${row['flash_successes']},${row['flash_count']},${row['total_enemies_flashed']},'
-        '${row['entry_wins']},${row['match_entry_rate']},${row['match_entry_success_rate']},${row['entry_count']},'
-        '${row['total_damage']},${row['total_headshots_percentage']},${row['average_headshots_percentage']},'
-        '${row['matches']},${row['wins']},${row['total_rounds']},${row['win_rate_percentage']},${row['total_kills']},'
-        '${row['average_kills']},${row['average_deaths']},${row['average_assists']},${row['headshots']},'
-        '${row['assists']},${row['deaths']},${row['kills']},${row['rounds']},'
-        '${row['triple_kills']},${row['quadro_kills']},${row['penta_kills']},'
-        '${row['average_triple_kills']},${row['average_quadro_kills']},${row['average_penta_kills']},'
-        '${row['mvps']},${row['average_mvps']},${row['headshots_per_match']}');
-  }
-
-  await sink.close();
-  logger.i('Exported ${results.length} map stat records to $outputPath');
-}
-
-Future<void> exportCompleteDataToJson(String outputPath) async {
-  logger.i('Exporting complete data to JSON file: $outputPath');
-
-  // Получаем всех обработанных игроков
-  final playersResult = await db.rawQuery('''
-    SELECT * FROM players WHERE processed = 1
-  ''');
-
-  final players = <Map<String, dynamic>>[];
-
-  for (final playerRow in playersResult) {
-    final playerId = playerRow['player_id'] as String;
-    final player = {
-      'player_id': playerId,
-      'nickname': playerRow['nickname'],
-      'skill_level': playerRow['skill_level'],
-      'faceit_elo': playerRow['faceit_elo'],
-      'country': playerRow['country'],
-      'stats': {},
-      'map_stats': [],
-      'teammates': []
-    };
-
-    // Получаем статистику игрока
-    final statsResult = await db.rawQuery('''
-      SELECT * FROM player_stats WHERE player_id = ?
-    ''', [playerId]);
-
-    if (statsResult.isNotEmpty) {
-      player['stats'] = Map<String, dynamic>.from(statsResult.first);
-    }
-
-    // Получаем статистику по картам
-    final mapStatsResult = await db.rawQuery('''
-      SELECT * FROM player_map_stats WHERE player_id = ? ORDER BY map_name
-    ''', [playerId]);
-
-    player['map_stats'] = List<Map<String, dynamic>>.from(
-        mapStatsResult.map((row) => Map<String, dynamic>.from(row)));
-
-    // Получаем тиммейтов с их статистикой
-    final teammatesResult = await db.rawQuery('''
-      SELECT 
-        t.id as teammate_relation_id,
-        t.player_id,
-        t.teammate_id,
-        t.matches_together,
-        t.wins_together,
-        p.nickname as teammate_nickname,
-        p.skill_level as teammate_skill_level,
-        p.faceit_elo as teammate_faceit_elo,
-        p.country as teammate_country,
-        (t.wins_together * 1.0 / t.matches_together) as win_rate
-      FROM teammates t
-      JOIN players p ON t.teammate_id = p.player_id
-      WHERE t.player_id = ?
-      ORDER BY win_rate DESC
-    ''', [playerId]);
-
-    final teammates = <Map<String, dynamic>>[];
-
-    for (final teammateRow in teammatesResult) {
-      final teammateId = teammateRow['teammate_id'] as String;
-      final teammate = {
-        'teammate_id': teammateId,
-        'teammate_nickname': teammateRow['teammate_nickname'],
-        'teammate_skill_level': teammateRow['teammate_skill_level'],
-        'teammate_faceit_elo': teammateRow['teammate_faceit_elo'],
-        'teammate_country': teammateRow['teammate_country'],
-        'matches_together': teammateRow['matches_together'],
-        'wins_together': teammateRow['wins_together'],
-        'win_rate': teammateRow['win_rate'],
-        'stats': {},
-        'map_stats': []
-      };
-
-      // Получаем общую статистику тиммейта
-      final teammateStatsResult = await db.rawQuery('''
-        SELECT * FROM player_stats WHERE player_id = ?
-      ''', [teammateId]);
-
-      if (teammateStatsResult.isNotEmpty) {
-        teammate['stats'] =
-            Map<String, dynamic>.from(teammateStatsResult.first);
-      }
-
-      // Получаем статистику по картам для тиммейта
-      final teammateMapStatsResult = await db.rawQuery('''
-        SELECT * FROM player_map_stats WHERE player_id = ? ORDER BY map_name
-      ''', [teammateId]);
-
-      teammate['map_stats'] = List<Map<String, dynamic>>.from(
-          teammateMapStatsResult.map((row) => Map<String, dynamic>.from(row)));
-
-      teammates.add(teammate);
-    }
-
-    player['teammates'] = teammates;
-    players.add(player);
-  }
-
-  // Создаем итоговую структуру JSON
-  final completeData = {
-    'export_date': DateTime.now().toIso8601String(),
-    'total_players': players.length,
-    'players': players
-  };
-
-  // Записываем в файл
-  final file = File(outputPath);
-
-  try {
-    final jsonString = jsonEncode(completeData);
-    await file.writeAsString(jsonString);
-    logger.i(
-        'Exported complete data for ${players.length} players to $outputPath');
-  } catch (e) {
-    logger.e('Error writing JSON file: $e');
-    // Попытка записать с более простым подходом в случае ошибки
-    try {
-      const encoder = JsonEncoder.withIndent('  '); // Более читабельный формат
-      final jsonString = encoder.convert(completeData);
-      await file.writeAsString(jsonString);
-      logger.i(
-          'Exported data with simplified encoder for ${players.length} players');
-    } catch (e2) {
-      logger.e('Failed to write JSON even with simplified encoder: $e2');
-      rethrow;
-    }
-  }
 }
