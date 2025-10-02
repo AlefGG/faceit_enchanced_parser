@@ -100,7 +100,7 @@ void main(List<String> arguments) async {
     // startPlayerIndex = int.parse(results['start']);
     // endPlayerIndex = int.parse(results['end']);
     startPlayerIndex = 0;
-    endPlayerIndex = 10;
+    endPlayerIndex = 100;
     // Проверка валидности диапазона
     if (startPlayerIndex < 0 || endPlayerIndex <= startPlayerIndex) {
       throw ArgumentError(

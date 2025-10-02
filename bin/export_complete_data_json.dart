@@ -28,6 +28,13 @@ Future<void> exportCompleteDataToJson(
       'country': playerRow['country'],
       'stats': {},
       'map_stats': [],
+      'activity': {
+        'hours': List<int>.filled(24, 0),
+        'hours_norm': List<double>.filled(24, 0.0),
+        'weekdays': List<int>.filled(7, 0),
+        'weekdays_norm': List<double>.filled(7, 0.0),
+        'total_activity_matches': 0,
+      },
       'teammates': []
     };
 
@@ -47,6 +54,43 @@ Future<void> exportCompleteDataToJson(
 
     player['map_stats'] = List<Map<String, dynamic>>.from(
         mapStatsResult.map((row) => Map<String, dynamic>.from(row)));
+
+    // Активность игрока по часам (0..23 UTC) и дням недели (1..7, Mon..Sun)
+    final hoursArr = List<int>.filled(24, 0);
+    final hoursResult = await db.rawQuery('''
+      SELECT hour, matches_count FROM player_activity_hours WHERE player_id = ?
+    ''', [playerId]);
+    for (final row in hoursResult) {
+      final h = (row['hour'] as int?) ?? 0;
+      final c = (row['matches_count'] as int?) ?? 0;
+      if (h >= 0 && h < 24) hoursArr[h] = c;
+    }
+
+    final weekdaysArr = List<int>.filled(7, 0); // 0..6 => Mon..Sun
+    final weekdaysResult = await db.rawQuery('''
+      SELECT weekday, matches_count FROM player_activity_weekdays WHERE player_id = ?
+    ''', [playerId]);
+    for (final row in weekdaysResult) {
+      final wd = (row['weekday'] as int?) ?? 0; // 1..7 Mon..Sun
+      final c = (row['matches_count'] as int?) ?? 0;
+      if (wd >= 1 && wd <= 7) weekdaysArr[wd - 1] = c;
+    }
+
+    final totalActivity = hoursArr.fold<int>(0, (a, b) => a + b);
+    final hoursNorm = totalActivity > 0
+        ? hoursArr.map((c) => c / totalActivity).toList()
+        : List<double>.filled(24, 0.0);
+    final weekdaysNorm = totalActivity > 0
+        ? weekdaysArr.map((c) => c / totalActivity).toList()
+        : List<double>.filled(7, 0.0);
+
+    player['activity'] = {
+      'hours': hoursArr,
+      'hours_norm': hoursNorm,
+      'weekdays': weekdaysArr,
+      'weekdays_norm': weekdaysNorm,
+      'total_activity_matches': totalActivity,
+    };
 
     // Получаем тиммейтов с их статистикой
     final teammatesResult = await db.rawQuery('''

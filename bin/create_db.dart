@@ -148,6 +148,7 @@ Future<void> createDb(Database db, int version) async {
     map TEXT,
     region TEXT,
     date INTEGER,
+    finished_at INTEGER,
     score_faction1 INTEGER,
     score_faction2 INTEGER
   )
@@ -237,6 +238,7 @@ Future<void> createDb(Database db, int version) async {
   await ensureColumn('matches', 'map', 'TEXT');
   await ensureColumn('matches', 'region', 'TEXT');
   await ensureColumn('matches', 'date', 'INTEGER');
+  await ensureColumn('matches', 'finished_at', 'INTEGER');
   await ensureColumn('matches', 'score_faction1', 'INTEGER');
   await ensureColumn('matches', 'score_faction2', 'INTEGER');
 
@@ -247,4 +249,24 @@ Future<void> createDb(Database db, int version) async {
   await ensureColumn('player_matches', 'country', 'TEXT');
   await ensureColumn('player_matches', 'skill_level', 'INTEGER');
   await ensureColumn('player_matches', 'faceit_elo', 'INTEGER');
+
+  // Activity tables (per hour and per weekday)
+  await db.execute('''
+    CREATE TABLE IF NOT EXISTS player_activity_hours (
+      player_id TEXT NOT NULL,
+      hour INTEGER NOT NULL, -- 0..23 UTC
+      matches_count INTEGER NOT NULL,
+      PRIMARY KEY (player_id, hour),
+      FOREIGN KEY (player_id) REFERENCES players(player_id) ON DELETE CASCADE
+    )
+  ''');
+  await db.execute('''
+    CREATE TABLE IF NOT EXISTS player_activity_weekdays (
+      player_id TEXT NOT NULL,
+      weekday INTEGER NOT NULL, -- 1..7 (Mon..Sun) UTC
+      matches_count INTEGER NOT NULL,
+      PRIMARY KEY (player_id, weekday),
+      FOREIGN KEY (player_id) REFERENCES players(player_id) ON DELETE CASCADE
+    )
+  ''');
 }

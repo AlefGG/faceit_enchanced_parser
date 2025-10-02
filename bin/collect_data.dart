@@ -32,6 +32,9 @@ Future<void> collectData() async {
         await fetchPlayerMatches(playerId, player['nickname'].toString());
     logger.i('Fetched $fetched matches for $playerId');
 
+    // Построение активности по часам и дням недели
+    await computeAndStorePlayerActivity(playerId);
+
     // 3) Тиммейты (>=5 совместных матчей). Для тиммейтов — только общие статы.
     await processTeammates(playerId, player['nickname'].toString());
 
@@ -49,6 +52,59 @@ Future<void> collectData() async {
 
   // Сохраняем финальный прогресс
   await saveProgress(startPlayerIndex + processedCount);
+}
+
+// Строим активность по часам (0..23 UTC) и дням недели (1..7) за последние 300 матчей
+Future<void> computeAndStorePlayerActivity(String playerId) async {
+  // Берем последние 300 матчей по дате
+  final matches = await db.rawQuery('''
+    SELECT m.date as started_at, m.finished_at as finished_at
+    FROM matches m
+    JOIN player_matches pm ON pm.match_id = m.match_id
+    WHERE pm.player_id = ?
+    ORDER BY m.date DESC
+    LIMIT 300
+  ''', [playerId]);
+
+  if (matches.isEmpty) return;
+
+  // Инициализируем гистограммы
+  final Map<int, int> hours = {for (var h = 0; h < 24; h++) h: 0};
+  final Map<int, int> weekdays = {for (var d = 1; d <= 7; d++) d: 0};
+
+  for (final m in matches) {
+    final int ts = (m['finished_at'] as int?) ?? (m['started_at'] as int?) ?? 0;
+    if (ts == 0) continue;
+    final dt = DateTime.fromMillisecondsSinceEpoch(ts * 1000, isUtc: true);
+    hours[dt.hour] = (hours[dt.hour] ?? 0) + 1;
+    weekdays[dt.weekday] = (weekdays[dt.weekday] ?? 0) + 1;
+  }
+
+  // Сохраняем в БД (upsert)
+  final batch = db.batch();
+  hours.forEach((hour, count) {
+    batch.insert(
+      'player_activity_hours',
+      {
+        'player_id': playerId,
+        'hour': hour,
+        'matches_count': count,
+      },
+      conflictAlgorithm: ConflictAlgorithm.replace,
+    );
+  });
+  weekdays.forEach((wd, count) {
+    batch.insert(
+      'player_activity_weekdays',
+      {
+        'player_id': playerId,
+        'weekday': wd,
+        'matches_count': count,
+      },
+      conflictAlgorithm: ConflictAlgorithm.replace,
+    );
+  });
+  await batch.commit(noResult: true);
 }
 
 // Получение топ игроков с пагинацией (загружаем, только если ещё не загружали source='top')
@@ -206,6 +262,7 @@ Future<int> fetchPlayerMatches(String playerId, String playerName) async {
                 'map': match['map'] ?? '',
                 'region': match['region'] ?? '',
                 'date': match['started_at'] ?? 0,
+                'finished_at': match['finished_at'] ?? 0,
                 'score_faction1': match['results'] != null &&
                         match['results']['score'] != null
                     ? int.parse(
