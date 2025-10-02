@@ -25,7 +25,7 @@ Future<void> collectData() async {
         'Processed ${processedCount + 1}/${players.length}: ${player['nickname']}, $playerId');
 
     // 1) Общая статистика игрока
-    await fetchPlayerStats(playerId);
+    await fetchPlayerStats(playerId, player['nickname'].toString());
 
     // 2) Последние 300 матчей (учитываем только 5v5 внутри функции)
     final fetched =
@@ -33,7 +33,7 @@ Future<void> collectData() async {
     logger.i('Fetched $fetched matches for $playerId');
 
     // 3) Тиммейты (>=5 совместных матчей). Для тиммейтов — только общие статы.
-    await processTeammates(playerId);
+    await processTeammates(playerId, player['nickname'].toString());
 
     // Отмечаем игрока как обработанного
     await db.update('players', {'processed': 1},
@@ -391,15 +391,21 @@ Future<int> fetchPlayerMatches(String playerId, String playerName) async {
 // Получение статистики игрока
 Future<void> fetchPlayerStats(
   String playerId,
+  String playerName,
 ) async {
-  logger.i('Fetching stats for player $playerId');
+  logger.i('Fetching stats for player $playerName, $playerId');
 
   // Проверяем, есть ли уже статистика для этого игрока
+  if (loadedStats.contains(playerId)) {
+    logger.i('Stats for $playerId already loaded in-memory, skipping fetch');
+    return;
+  }
   final existingStats = await db
       .query('player_stats', where: 'player_id = ?', whereArgs: [playerId]);
 
   if (existingStats.isNotEmpty) {
-    logger.i('Player $playerId already has stats, skipping fetch');
+    logger.i('Player $playerName, $playerId already has stats, skipping fetch');
+    loadedStats.add(playerId);
     return;
   }
 
@@ -417,7 +423,7 @@ Future<void> fetchPlayerStats(
       final data = jsonDecode(response.body);
 
       if (data['lifetime'] == null) {
-        logger.w('No lifetime stats found for player $playerId');
+        logger.w('No lifetime stats found for player $playerName, $playerId');
         return;
       }
 
@@ -425,7 +431,8 @@ Future<void> fetchPlayerStats(
       final stats = data['lifetime'];
 
       // Логирование для отладки
-      logger.d('Raw lifetime stats for player $playerId: ${stats.toString()}');
+      logger.d(
+          'Raw lifetime stats for player $playerName, $playerId: ${stats.toString()}');
 
       // Безопасное получение значений с учетом отличающихся названий полей
       double safeParseDouble(String? value) {
@@ -515,11 +522,14 @@ Future<void> fetchPlayerStats(
         'total_kills': safeParseInt(stats['Total Kills with extended stats']),
       });
 
-      logger.i('Saved complete stats for player $playerId');
+      logger.i('Saved complete stats for player $playerName, $playerId');
 
 // Обработка статистики по картам
       if (data['segments'] != null) {
         final segments = List<Map<String, dynamic>>.from(data['segments']);
+
+        logger.i(
+            'Processing map stats for player $playerName, $playerId on maps');
 
         for (final segment in segments) {
           // Проверяем, что это статистика по карте в режиме 5v5
@@ -530,17 +540,14 @@ Future<void> fetchPlayerStats(
             final mapName = segment['label'] as String;
             final mapStats = segment['stats'] as Map<String, dynamic>;
 
-            logger
-                .i('Processing map stats for player $playerId on map $mapName');
-
             // Проверяем, есть ли уже статистика по этой карте
             final existingMapStats = await db.query('player_map_stats',
                 where: 'player_id = ? AND map_name = ?',
                 whereArgs: [playerId, mapName]);
 
             if (existingMapStats.isNotEmpty) {
-              logger.i(
-                  'Map stats for player $playerId on map $mapName already exist, skipping');
+              // logger.i(
+              //     'Map stats for player $playerId on map $mapName already exist, skipping');
               continue;
             }
 
@@ -648,13 +655,12 @@ Future<void> fetchPlayerStats(
               'headshots_per_match':
                   safeParseDouble(mapStats['Headshots per Match']),
             });
-
-            logger.i('Saved map stats for player $playerId on map $mapName');
           }
         }
       }
     } else if (response.statusCode == 404) {
-      logger.w('Player $playerId not found or has no CS2 stats (404)');
+      logger.w(
+          'Player $playerName, $playerId not found or has no CS2 stats (404)');
     } else {
       logger.e(
           'Failed to load player stats: ${response.statusCode} - ${response.body}');
@@ -668,15 +674,15 @@ Future<void> fetchPlayerStats(
 }
 
 // Обработка тиммейтов
-Future<void> processTeammates(String playerId) async {
-  logger.i('Processing teammates for player $playerId');
+Future<void> processTeammates(String playerId, String playerName) async {
+  logger.i('Processing teammates for player $playerName, $playerId');
 
   // Находим все матчи игрока
   final playerMatches = await db
       .query('player_matches', where: 'player_id = ?', whereArgs: [playerId]);
 
   if (playerMatches.isEmpty) {
-    logger.w('No matches found for player $playerId');
+    logger.w('No matches found for player $playerName, $playerId');
     return;
   }
 
@@ -755,7 +761,7 @@ Future<void> processTeammates(String playerId) async {
     final hasStats = await db
         .query('player_stats', where: 'player_id = ?', whereArgs: [teammateId]);
     if (hasStats.isEmpty) {
-      await fetchPlayerStats(teammateId);
+      await fetchPlayerStats(teammateId, 'Teammate of $playerName');
     }
   }
 }
