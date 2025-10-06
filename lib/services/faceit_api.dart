@@ -58,4 +58,19 @@ class FaceitApi {
     }
     return jsonDecode(resp.body) as Map<String, dynamic>;
   }
+
+  /// Basic player profile (country, nickname, games.cs2.faceit_elo, skill_level)
+  Future<Map<String, dynamic>?> fetchPlayerProfile(String playerId) async {
+    final url = Uri.parse('https://open.faceit.com/data/v4/players/$playerId');
+    final resp = await http.get(url);
+    if (resp.statusCode == 404) {
+      logger.i('Profile 404 for $playerId');
+      return null;
+    }
+    if (resp.statusCode != 200) {
+      logger.w('Profile request failed ${resp.statusCode} ${resp.body}');
+      return null;
+    }
+    return jsonDecode(resp.body) as Map<String, dynamic>;
+  }
 }

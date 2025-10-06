@@ -41,7 +41,12 @@ class Pipeline {
         api: api, matchRepo: matchRepo, statsRepo: statsRepo, logger: logger);
     final activityCalc = ActivityCalculator(repo: activityRepo, logger: logger);
     final teammatesProcessor = TeammatesProcessor(
-        teammateRepo: teammateRepo, statsFetcher: statsFetcher, logger: logger);
+        teammateRepo: teammateRepo,
+        playerRepo: playerRepo,
+        statsRepo: statsRepo,
+        statsFetcher: statsFetcher,
+        api: api,
+        logger: logger);
     final exporter = CompleteDataExporter(db: db, logger: logger);
 
     final limit = endIndex - startIndex;
