@@ -8,10 +8,14 @@ class CompleteDataExporter {
   final Logger logger;
   CompleteDataExporter({required this.db, required this.logger});
 
-  Future<void> export(String outputPath) async {
-    logger.i('Exporting complete data to $outputPath');
-    final playersResult =
-        await db.rawQuery('SELECT * FROM players WHERE processed = 1');
+  /// Export all processed players. If [chunkSize] is provided (default 10), the
+  /// exporter will produce multiple JSON files each containing up to [chunkSize]
+  /// players plus a manifest file listing all chunk files. If [chunkSize] is
+  /// null or <= 0, a single file at [outputPath] is produced (legacy mode).
+  Future<void> export(String outputPath, {int chunkSize = 10}) async {
+    logger.i('Exporting complete data to $outputPath (chunkSize=$chunkSize)');
+    final playersResult = await db.rawQuery(
+        'SELECT * FROM players WHERE processed = 1 ORDER BY rank_order');
     final players = <Map<String, dynamic>>[];
     for (final pr in playersResult) {
       final playerId = pr['player_id'] as String;
@@ -374,14 +378,55 @@ class CompleteDataExporter {
       player['teammates'] = teammatesJson;
       players.add(player);
     }
-    final complete = {
-      'export_date': DateTime.now().toIso8601String(),
+    logger.i('Total players prepared for export: ${players.length}');
+    if (chunkSize <= 0) {
+      final single = {
+        'export_date': DateTime.now().toIso8601String(),
+        'total_players': players.length,
+        'players': players
+      };
+      await File(outputPath).writeAsString(jsonEncode(single));
+      logger.i('Wrote single export file: $outputPath');
+      return;
+    }
+    // Split into chunks
+    final directory = File(outputPath).parent;
+    if (!directory.existsSync()) {
+      directory.createSync(recursive: true);
+    }
+    final baseName = File(outputPath).uri.pathSegments.last;
+    final ts = DateTime.now().toIso8601String().replaceAll(':', '-');
+    final chunkFiles = <String>[];
+    for (int i = 0; i < players.length; i += chunkSize) {
+      final slice = players.sublist(
+          i, i + chunkSize > players.length ? players.length : i + chunkSize);
+      final chunkIndex = (i ~/ chunkSize) + 1;
+      final chunkName =
+          '${baseName.replaceFirst('.json', '')}_chunk_$chunkIndex.json';
+      final chunkPath = directory.path + Platform.pathSeparator + chunkName;
+      final obj = {
+        'export_date': ts,
+        'chunk_index': chunkIndex,
+        'chunk_size': slice.length,
+        'total_players_global': players.length,
+        'players': slice
+      };
+      await File(chunkPath).writeAsString(jsonEncode(obj));
+      chunkFiles.add(chunkName);
+      logger.i(
+          'Wrote chunk $chunkIndex with ${slice.length} players -> $chunkName');
+    }
+    // Manifest file
+    final manifest = {
+      'export_date': ts,
       'total_players': players.length,
-      'players': players
+      'chunk_size': chunkSize,
+      'chunks_count': chunkFiles.length,
+      'files': chunkFiles
     };
-    final jsonString = jsonEncode(complete);
-    logger.i('Total players exported: ${players.length}');
-    final file = File(outputPath);
-    await file.writeAsString(jsonString);
+    final manifestName = '${baseName.replaceFirst('.json', '')}_manifest.json';
+    final manifestPath = directory.path + Platform.pathSeparator + manifestName;
+    await File(manifestPath).writeAsString(jsonEncode(manifest));
+    logger.i('Wrote manifest $manifestName with ${chunkFiles.length} chunks');
   }
 }

@@ -116,7 +116,7 @@ class Pipeline {
     final timestamp = DateTime.now();
     final name =
         'faceit_complete_data_${timestamp.toIso8601String().replaceAll(':', '-')}.json';
-    await exporter.export(name);
+    await exporter.export(name, chunkSize: 10);
     final totalElapsed = DateTime.now().difference(pipelineStart);
     final avgMs =
         processed == 0 ? 0 : (totalElapsed.inMilliseconds / processed).round();
