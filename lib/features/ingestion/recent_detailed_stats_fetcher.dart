@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'package:logger/logger.dart';
 import '../../services/faceit_api.dart';
+import '../../core/config.dart';
 import '../../repositories/match_repository.dart';
 import '../../repositories/stats_repository.dart';
 
@@ -9,6 +10,8 @@ class RecentDetailedStatsFetcher {
   final MatchRepository matchRepo;
   final StatsRepository statsRepo;
   final Logger logger;
+  // In-memory cache to avoid re-fetching the same match detailed stats
+  final Map<String, Map<String, dynamic>> _matchDetailsCache = {};
   RecentDetailedStatsFetcher(
       {required this.api,
       required this.matchRepo,
@@ -17,17 +20,25 @@ class RecentDetailedStatsFetcher {
 
   Future<void> fetchRecent(String playerId, {int limit = 20}) async {
     final rows = await matchRepo.recentMatchIdsForPlayer(playerId, limit);
-    for (final r in rows) {
-      final matchId = r['match_id'] as String;
-      // naive duplicate check via aggregate; repository could expose exists but reuse for brevity
-      // (In original code it queried recent_player_match_stats before insert)
-      final detailed = await api.fetchMatchDetailedStats(matchId);
-      if (detailed == null) continue;
+    // Limited concurrency: process match detailed stats with a FIFO queue
+    final concurrency = AppConfig.detailedStatsParallelism;
+    final tasks = <Future<void>>[];
+    Future<void> runTask(String matchId) async {
+      Map<String, dynamic>? detailed;
+      if (_matchDetailsCache.containsKey(matchId)) {
+        detailed = _matchDetailsCache[matchId];
+      } else {
+        detailed = await api.fetchMatchDetailedStats(matchId);
+        if (detailed != null) {
+          _matchDetailsCache[matchId] = detailed;
+        }
+      }
+      if (detailed == null) return;
       final rounds = detailed['rounds'];
-      if (rounds is! List || rounds.isEmpty) continue;
+      if (rounds is! List || rounds.isEmpty) return;
       final first = rounds.first;
       final teams = first['teams'];
-      if (teams is! List) continue;
+      if (teams is! List) return;
       Map<String, dynamic>? playerObj;
       for (final t in teams) {
         if (t is Map && t['players'] is List) {
@@ -40,7 +51,7 @@ class RecentDetailedStatsFetcher {
         }
         if (playerObj != null) break;
       }
-      if (playerObj == null) continue;
+      if (playerObj == null) return;
       final stats =
           (playerObj['player_stats'] as Map?)?.cast<String, dynamic>() ?? {};
       int? toInt(String k) => int.tryParse('${stats[k] ?? ''}');
@@ -81,6 +92,18 @@ class RecentDetailedStatsFetcher {
             toDouble('Utility Damage per Round in a Match'),
         'enemies_flashed': toInt('Enemies Flashed'),
       });
+    }
+
+    for (final r in rows) {
+      final matchId = r['match_id'] as String;
+      tasks.add(runTask(matchId));
+      if (tasks.length == concurrency) {
+        await Future.wait(tasks);
+        tasks.clear();
+      }
+    }
+    if (tasks.isNotEmpty) {
+      await Future.wait(tasks);
     }
   }
 }
