@@ -59,6 +59,24 @@ class FaceitApi {
     return jsonDecode(resp.body) as Map<String, dynamic>;
   }
 
+  /// Fetch recent per-match stats for a player (single aggregated endpoint).
+  /// Example: /players/{id}/games/cs2/stats?offset=0&limit=20
+  /// Returns list of objects each containing a 'stats' map with keys like:
+  ///  'Match Id', 'Kills', 'Deaths', 'Assists', 'ADR', 'K/R Ratio', 'K/D Ratio', 'Headshots', 'Headshots %', 'MVPs', etc.
+  Future<List<Map<String, dynamic>>> fetchRecentPlayerGameStats(String playerId,
+      {int offset = 0, int limit = 20}) async {
+    final url = Uri.parse(
+        'https://open.faceit.com/data/v4/players/$playerId/games/cs2/stats?offset=$offset&limit=$limit');
+    final resp = await http.get(url);
+    if (resp.statusCode != 200) {
+      logger.w(
+          'Recent game stats request failed ${resp.statusCode} ${resp.body}');
+      return [];
+    }
+    final data = jsonDecode(resp.body) as Map<String, dynamic>;
+    return List<Map<String, dynamic>>.from(data['items'] ?? []);
+  }
+
   /// Basic player profile (country, nickname, games.cs2.faceit_elo, skill_level)
   Future<Map<String, dynamic>?> fetchPlayerProfile(String playerId) async {
     final url = Uri.parse('https://open.faceit.com/data/v4/players/$playerId');

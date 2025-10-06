@@ -89,6 +89,14 @@ class PlayerStatsFetcher {
         final mapName = label.toString();
         if (await statsRepo.hasMapStats(playerId, mapName)) continue;
         try {
+          // Helper with fallbacks for map segment key discrepancies (segment vs lifetime naming)
+          int iAny(List<String> keys) {
+            for (final k in keys) {
+              if (segStats[k] != null) return i(segStats[k]);
+            }
+            return 0;
+          }
+
           await statsRepo.insertMapStats({
             'player_id': playerId,
             'map_name': mapName,
@@ -103,24 +111,28 @@ class PlayerStatsFetcher {
             'v2_count': i(segStats['Total 1v2 Count']),
             'match_1v1_win_rate': d(segStats['1v1 Win Rate']),
             'match_1v2_win_rate': d(segStats['1v2 Win Rate']),
+            'total_1v1_wins': i(segStats['Total 1v1 Wins']),
+            'total_1v2_wins': i(segStats['Total 1v2 Wins']),
             'utility_damage_success_rate':
                 d(segStats['Utility Damage Success Rate']),
             'utility_damage_per_round': d(segStats['Utility Damage per Round']),
             'utility_damage': i(segStats['Total Utility Damage']),
             'utility_usage_per_round': d(segStats['Utility Usage per Round']),
             'utility_success_rate': d(segStats['Utility Success Rate']),
+            'total_utility_successes': i(segStats['Total Utility Successes']),
+            'total_utility_count': i(segStats['Total Utility Count']),
             'enemies_flashed_per_round':
                 d(segStats['Enemies Flashed per Round']),
             'flashes_per_round': d(segStats['Flashes per Round']),
             'flash_success_rate': d(segStats['Flash Success Rate']),
             'flash_successes': i(segStats['Total Flash Successes']),
             'flash_count': i(segStats['Total Flash Count']),
+            'total_enemies_flashed': i(segStats['Total Enemies Flashed']),
             'entry_wins': i(segStats['Total Entry Wins']),
             'match_entry_rate': d(segStats['Entry Rate']),
             'match_entry_success_rate': d(segStats['Entry Success Rate']),
             'entry_count': i(segStats['Total Entry Count']),
             'total_damage': i(segStats['Total Damage']),
-            'total_utility_successes': i(segStats['Total Utility Successes']),
             'total_headshots_percentage': i(segStats['Total Headshots %']),
             'average_headshots_percentage': d(segStats['Average Headshots %']),
             'matches': i(segStats['Matches']),
@@ -131,18 +143,19 @@ class PlayerStatsFetcher {
             'average_kills': d(segStats['Average Kills']),
             'average_deaths': d(segStats['Average Deaths']),
             'average_assists': d(segStats['Average Assists']),
-            'headshots': i(segStats['Total Headshots']),
-            'assists': i(segStats['Total Assists']),
-            'deaths': i(segStats['Total Deaths']),
-            'kills': i(segStats['Total Kills']),
+            // Segment uses singular keys ("Headshots", "Assists", "Kills", "Deaths")
+            'headshots': iAny(['Total Headshots', 'Headshots']),
+            'assists': iAny(['Total Assists', 'Assists']),
+            'deaths': iAny(['Total Deaths', 'Deaths']),
+            'kills': iAny(['Total Kills', 'Kills']),
             'rounds': i(segStats['Rounds']),
-            'triple_kills': i(segStats['Total Triple Kills']),
-            'quadro_kills': i(segStats['Total Quadro Kills']),
-            'penta_kills': i(segStats['Total Penta Kills']),
+            'triple_kills': iAny(['Total Triple Kills', 'Triple Kills']),
+            'quadro_kills': iAny(['Total Quadro Kills', 'Quadro Kills']),
+            'penta_kills': iAny(['Total Penta Kills', 'Penta Kills']),
             'average_triple_kills': d(segStats['Average Triple Kills']),
             'average_quadro_kills': d(segStats['Average Quadro Kills']),
             'average_penta_kills': d(segStats['Average Penta Kills']),
-            'mvps': i(segStats['Total MVPs']),
+            'mvps': iAny(['Total MVPs', 'MVPs']),
             'average_mvps': d(segStats['Average MVPs']),
             'headshots_per_match': d(segStats['Headshots per Match']),
           });

@@ -33,6 +33,14 @@ class StatsRepository {
         conflictAlgorithm: ConflictAlgorithm.replace);
   }
 
+  Future<void> updateRecentMatchStats(
+      String matchId, String playerId, Map<String, Object?> update) async {
+    if (update.isEmpty) return;
+    await db.update('recent_player_match_stats', update,
+        where: 'match_id = ? AND player_id = ?',
+        whereArgs: [matchId, playerId]);
+  }
+
   Future<Map<String, dynamic>?> aggregateRecent(
       String playerId, int limit) async {
     final rows = await db.rawQuery('''

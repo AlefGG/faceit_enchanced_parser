@@ -128,47 +128,59 @@ class _MockHttpClient extends HttpClientWrapper {
         },
         'segments': []
       };
-    } else if (u.contains('/matches/') && u.contains('/stats')) {
+    } else if (u.contains('/games/cs2/stats')) {
+      // Recent per-match stats endpoint stub (2 items)
       body = {
-        'rounds': [
+        'items': [
           {
-            'teams': [
-              {
-                'players': [
-                  {
-                    'player_id': 'mock_player_1',
-                    'player_stats': {
-                      'Kills': '20',
-                      'Deaths': '15',
-                      'Assists': '5',
-                      'Headshot %': '50'
-                    }
-                  },
-                  {
-                    'player_id': 'mock_teammate_a',
-                    'player_stats': {
-                      'Kills': '10',
-                      'Deaths': '18',
-                      'Assists': '3',
-                      'Headshot %': '40'
-                    }
-                  }
-                ]
-              },
-              {
-                'players': [
-                  {
-                    'player_id': 'mock_opponent',
-                    'player_stats': {
-                      'Kills': '25',
-                      'Deaths': '20',
-                      'Assists': '2',
-                      'Headshot %': '45'
-                    }
-                  }
-                ]
-              }
-            ]
+            'stats': {
+              'Match Id': 'recent_match_1',
+              'Kills': '20',
+              'Deaths': '15',
+              'Assists': '5',
+              'ADR': '85.5',
+              'K/R Ratio': '0.80',
+              'K/D Ratio': '1.33',
+              'Headshots': '12',
+              'Headshots %': '60',
+              'MVPs': '3',
+              'Double Kills': '4',
+              'Triple Kills': '1',
+              'Quadro Kills': '0',
+              'Penta Kills': '0',
+              'Rounds': '24',
+              'First Half Score': '8',
+              'Second Half Score': '4',
+              'Overtime score': '0',
+              'Result': '1',
+              'Score': '13/11',
+              'Match Finished At': '${DateTime.now().millisecondsSinceEpoch}'
+            }
+          },
+          {
+            'stats': {
+              'Match Id': 'recent_match_2',
+              'Kills': '18',
+              'Deaths': '17',
+              'Assists': '4',
+              'ADR': '79.2',
+              'K/R Ratio': '0.75',
+              'K/D Ratio': '1.06',
+              'Headshots': '10',
+              'Headshots %': '55',
+              'MVPs': '2',
+              'Double Kills': '3',
+              'Triple Kills': '1',
+              'Quadro Kills': '0',
+              'Penta Kills': '0',
+              'Rounds': '22',
+              'First Half Score': '7',
+              'Second Half Score': '5',
+              'Overtime score': '2',
+              'Result': '0',
+              'Score': '11/13',
+              'Match Finished At': '${DateTime.now().millisecondsSinceEpoch}'
+            }
           }
         ]
       };

@@ -212,22 +212,28 @@ Future<void> createOrMigrate(Database db) async {
       headshots INTEGER,
       headshots_percentage REAL,
       mvps INTEGER,
-      entry_count INTEGER,
-      entry_wins INTEGER,
-      clutch_kills INTEGER,
-      sniper_kills INTEGER,
-      flash_count INTEGER,
-      flash_successes INTEGER,
-      utility_damage INTEGER,
-      utility_usage_per_round REAL,
-      utility_damage_per_round REAL,
-      enemies_flashed INTEGER,
+      double_kills INTEGER,
+      triple_kills INTEGER,
+      quadro_kills INTEGER,
+      penta_kills INTEGER,
+      rounds INTEGER,
+      first_half_score INTEGER,
+      second_half_score INTEGER,
+      overtime_score INTEGER,
+      result INTEGER,
+      map TEXT,
+      team TEXT,
+      winner TEXT,
+      score_for INTEGER,
+      score_against INTEGER,
+      match_finished_at INTEGER,
       created_at TEXT DEFAULT CURRENT_TIMESTAMP,
       PRIMARY KEY (match_id, player_id),
       FOREIGN KEY (match_id) REFERENCES matches(match_id) ON DELETE CASCADE,
       FOREIGN KEY (player_id) REFERENCES players(player_id) ON DELETE CASCADE
     )
   ''');
+  // Table reduced to only fields provided by new recent stats endpoint.
 
   // Indexes
   await db.execute(
@@ -245,4 +251,7 @@ Future<void> createOrMigrate(Database db) async {
   await ensureColumn('matches', 'competition_type', 'TEXT');
   await ensureColumn('player_activity_hours', 'window_size', 'INTEGER');
   await ensureColumn('player_activity_weekdays', 'window_size', 'INTEGER');
+  // All needed columns for recent_player_match_stats are now part of base definition; no ensureColumn calls required.
+  await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_recent_stats_player ON recent_player_match_stats(player_id, created_at)');
 }

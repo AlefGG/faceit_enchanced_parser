@@ -81,13 +81,30 @@ class CompleteDataExporter {
         'activity_window_matches': 20,
       };
       final recentAgg = await db.rawQuery('''
-        SELECT COUNT(*) as matches, AVG(kills) as avg_kills, AVG(deaths) as avg_deaths, AVG(assists) as avg_assists, AVG(adr) as avg_adr,
-               AVG(kr_ratio) as avg_kr_ratio, AVG(kd_ratio) as avg_kd_ratio, AVG(headshots) as avg_headshots, AVG(headshots_percentage) as avg_headshots_percentage,
-               AVG(mvps) as avg_mvps, AVG(entry_count) as avg_entry_count, AVG(entry_wins) as avg_entry_wins, AVG(clutch_kills) as avg_clutch_kills,
-               AVG(sniper_kills) as avg_sniper_kills, AVG(flash_count) as avg_flash_count, AVG(flash_successes) as avg_flash_successes,
-               AVG(utility_damage) as avg_utility_damage, AVG(utility_usage_per_round) as avg_utility_usage_per_round, AVG(utility_damage_per_round) as avg_utility_damage_per_round,
-               AVG(enemies_flashed) as avg_enemies_flashed
-        FROM recent_player_match_stats WHERE player_id = ? ORDER BY created_at DESC LIMIT 20
+        SELECT COUNT(*) as matches,
+               AVG(kills) as avg_kills,
+               AVG(deaths) as avg_deaths,
+               AVG(assists) as avg_assists,
+               AVG(adr) as avg_adr,
+               AVG(kr_ratio) as avg_kr_ratio,
+               AVG(kd_ratio) as avg_kd_ratio,
+               AVG(headshots) as avg_headshots,
+               AVG(headshots_percentage) as avg_headshots_percentage,
+               AVG(mvps) as avg_mvps,
+               AVG(double_kills) as avg_double_kills,
+               AVG(triple_kills) as avg_triple_kills,
+               AVG(quadro_kills) as avg_quadro_kills,
+               AVG(penta_kills) as avg_penta_kills,
+               AVG(rounds) as avg_rounds,
+               AVG(first_half_score) as avg_first_half_score,
+               AVG(second_half_score) as avg_second_half_score,
+               AVG(overtime_score) as avg_overtime_score,
+               SUM(CASE WHEN result = 1 THEN 1 ELSE 0 END) * 1.0 / COUNT(*) as win_rate,
+               AVG(score_for) as avg_score_for,
+               AVG(score_against) as avg_score_against
+        FROM (
+          SELECT * FROM recent_player_match_stats WHERE player_id = ? ORDER BY created_at DESC LIMIT 20
+        ) sub
       ''', [playerId]);
       if (recentAgg.isNotEmpty &&
           ((recentAgg.first['matches'] as int?) ?? 0) > 0) {
@@ -110,16 +127,17 @@ class CompleteDataExporter {
           'headshots': rd('avg_headshots'),
           'headshots_percentage': rd('avg_headshots_percentage'),
           'mvps': rd('avg_mvps'),
-          'entry_count': rd('avg_entry_count'),
-          'entry_wins': rd('avg_entry_wins'),
-          'clutch_kills': rd('avg_clutch_kills'),
-          'sniper_kills': rd('avg_sniper_kills'),
-          'flash_count': rd('avg_flash_count'),
-          'flash_successes': rd('avg_flash_successes'),
-          'utility_damage': rd('avg_utility_damage'),
-          'utility_usage_per_round': rd('avg_utility_usage_per_round'),
-          'utility_damage_per_round': rd('avg_utility_damage_per_round'),
-          'enemies_flashed': rd('avg_enemies_flashed'),
+          'double_kills': rd('avg_double_kills'),
+          'triple_kills': rd('avg_triple_kills'),
+          'quadro_kills': rd('avg_quadro_kills'),
+          'penta_kills': rd('avg_penta_kills'),
+          'rounds': rd('avg_rounds'),
+          'first_half_score': rd('avg_first_half_score'),
+          'second_half_score': rd('avg_second_half_score'),
+          'overtime_score': rd('avg_overtime_score'),
+          'win_rate': rd('win_rate'),
+          'score_for': rd('avg_score_for'),
+          'score_against': rd('avg_score_against'),
           'window_size': 20,
         };
       }
@@ -312,13 +330,30 @@ class CompleteDataExporter {
         final teammateActivityInsights = {'top_day_hour_combinations': topT};
         // Teammate recent average stats
         final recentAggT = await db.rawQuery('''
-          SELECT COUNT(*) as matches, AVG(kills) as avg_kills, AVG(deaths) as avg_deaths, AVG(assists) as avg_assists, AVG(adr) as avg_adr,
-                 AVG(kr_ratio) as avg_kr_ratio, AVG(kd_ratio) as avg_kd_ratio, AVG(headshots) as avg_headshots, AVG(headshots_percentage) as avg_headshots_percentage,
-                 AVG(mvps) as avg_mvps, AVG(entry_count) as avg_entry_count, AVG(entry_wins) as avg_entry_wins, AVG(clutch_kills) as avg_clutch_kills,
-                 AVG(sniper_kills) as avg_sniper_kills, AVG(flash_count) as avg_flash_count, AVG(flash_successes) as avg_flash_successes,
-                 AVG(utility_damage) as avg_utility_damage, AVG(utility_usage_per_round) as avg_utility_usage_per_round, AVG(utility_damage_per_round) as avg_utility_damage_per_round,
-                 AVG(enemies_flashed) as avg_enemies_flashed
-          FROM recent_player_match_stats WHERE player_id = ? ORDER BY created_at DESC LIMIT 20
+          SELECT COUNT(*) as matches,
+                 AVG(kills) as avg_kills,
+                 AVG(deaths) as avg_deaths,
+                 AVG(assists) as avg_assists,
+                 AVG(adr) as avg_adr,
+                 AVG(kr_ratio) as avg_kr_ratio,
+                 AVG(kd_ratio) as avg_kd_ratio,
+                 AVG(headshots) as avg_headshots,
+                 AVG(headshots_percentage) as avg_headshots_percentage,
+                 AVG(mvps) as avg_mvps,
+                 AVG(double_kills) as avg_double_kills,
+                 AVG(triple_kills) as avg_triple_kills,
+                 AVG(quadro_kills) as avg_quadro_kills,
+                 AVG(penta_kills) as avg_penta_kills,
+                 AVG(rounds) as avg_rounds,
+                 AVG(first_half_score) as avg_first_half_score,
+                 AVG(second_half_score) as avg_second_half_score,
+                 AVG(overtime_score) as avg_overtime_score,
+                 SUM(CASE WHEN result = 1 THEN 1 ELSE 0 END) * 1.0 / COUNT(*) as win_rate,
+                 AVG(score_for) as avg_score_for,
+                 AVG(score_against) as avg_score_against
+          FROM (
+            SELECT * FROM recent_player_match_stats WHERE player_id = ? ORDER BY created_at DESC LIMIT 20
+          ) sub
         ''', [tid]);
         Map<String, dynamic>? recentAvgT;
         if (recentAggT.isNotEmpty &&
@@ -342,16 +377,17 @@ class CompleteDataExporter {
             'headshots': rd('avg_headshots'),
             'headshots_percentage': rd('avg_headshots_percentage'),
             'mvps': rd('avg_mvps'),
-            'entry_count': rd('avg_entry_count'),
-            'entry_wins': rd('avg_entry_wins'),
-            'clutch_kills': rd('avg_clutch_kills'),
-            'sniper_kills': rd('avg_sniper_kills'),
-            'flash_count': rd('avg_flash_count'),
-            'flash_successes': rd('avg_flash_successes'),
-            'utility_damage': rd('avg_utility_damage'),
-            'utility_usage_per_round': rd('avg_utility_usage_per_round'),
-            'utility_damage_per_round': rd('avg_utility_damage_per_round'),
-            'enemies_flashed': rd('avg_enemies_flashed'),
+            'double_kills': rd('avg_double_kills'),
+            'triple_kills': rd('avg_triple_kills'),
+            'quadro_kills': rd('avg_quadro_kills'),
+            'penta_kills': rd('avg_penta_kills'),
+            'rounds': rd('avg_rounds'),
+            'first_half_score': rd('avg_first_half_score'),
+            'second_half_score': rd('avg_second_half_score'),
+            'overtime_score': rd('avg_overtime_score'),
+            'win_rate': rd('win_rate'),
+            'score_for': rd('avg_score_for'),
+            'score_against': rd('avg_score_against'),
             'window_size': 20,
           };
         }
@@ -506,13 +542,30 @@ class CompleteDataExporter {
       'activity_window_matches': 20,
     };
     final recentAgg = await db.rawQuery('''
-        SELECT COUNT(*) as matches, AVG(kills) as avg_kills, AVG(deaths) as avg_deaths, AVG(assists) as avg_assists, AVG(adr) as avg_adr,
-               AVG(kr_ratio) as avg_kr_ratio, AVG(kd_ratio) as avg_kd_ratio, AVG(headshots) as avg_headshots, AVG(headshots_percentage) as avg_headshots_percentage,
-               AVG(mvps) as avg_mvps, AVG(entry_count) as avg_entry_count, AVG(entry_wins) as avg_entry_wins, AVG(clutch_kills) as avg_clutch_kills,
-               AVG(sniper_kills) as avg_sniper_kills, AVG(flash_count) as avg_flash_count, AVG(flash_successes) as avg_flash_successes,
-               AVG(utility_damage) as avg_utility_damage, AVG(utility_usage_per_round) as avg_utility_usage_per_round, AVG(utility_damage_per_round) as avg_utility_damage_per_round,
-               AVG(enemies_flashed) as avg_enemies_flashed
-        FROM recent_player_match_stats WHERE player_id = ? ORDER BY created_at DESC LIMIT 20
+        SELECT COUNT(*) as matches,
+               AVG(kills) as avg_kills,
+               AVG(deaths) as avg_deaths,
+               AVG(assists) as avg_assists,
+               AVG(adr) as avg_adr,
+               AVG(kr_ratio) as avg_kr_ratio,
+               AVG(kd_ratio) as avg_kd_ratio,
+               AVG(headshots) as avg_headshots,
+               AVG(headshots_percentage) as avg_headshots_percentage,
+               AVG(mvps) as avg_mvps,
+               AVG(double_kills) as avg_double_kills,
+               AVG(triple_kills) as avg_triple_kills,
+               AVG(quadro_kills) as avg_quadro_kills,
+               AVG(penta_kills) as avg_penta_kills,
+               AVG(rounds) as avg_rounds,
+               AVG(first_half_score) as avg_first_half_score,
+               AVG(second_half_score) as avg_second_half_score,
+               AVG(overtime_score) as avg_overtime_score,
+               SUM(CASE WHEN result = 1 THEN 1 ELSE 0 END) * 1.0 / COUNT(*) as win_rate,
+               AVG(score_for) as avg_score_for,
+               AVG(score_against) as avg_score_against
+        FROM (
+          SELECT * FROM recent_player_match_stats WHERE player_id = ? ORDER BY created_at DESC LIMIT 20
+        ) sub
       ''', [playerId]);
     if (recentAgg.isNotEmpty &&
         ((recentAgg.first['matches'] as int?) ?? 0) > 0) {
@@ -535,16 +588,17 @@ class CompleteDataExporter {
         'headshots': rd('avg_headshots'),
         'headshots_percentage': rd('avg_headshots_percentage'),
         'mvps': rd('avg_mvps'),
-        'entry_count': rd('avg_entry_count'),
-        'entry_wins': rd('avg_entry_wins'),
-        'clutch_kills': rd('avg_clutch_kills'),
-        'sniper_kills': rd('avg_sniper_kills'),
-        'flash_count': rd('avg_flash_count'),
-        'flash_successes': rd('avg_flash_successes'),
-        'utility_damage': rd('avg_utility_damage'),
-        'utility_usage_per_round': rd('avg_utility_usage_per_round'),
-        'utility_damage_per_round': rd('avg_utility_damage_per_round'),
-        'enemies_flashed': rd('avg_enemies_flashed'),
+        'double_kills': rd('avg_double_kills'),
+        'triple_kills': rd('avg_triple_kills'),
+        'quadro_kills': rd('avg_quadro_kills'),
+        'penta_kills': rd('avg_penta_kills'),
+        'rounds': rd('avg_rounds'),
+        'first_half_score': rd('avg_first_half_score'),
+        'second_half_score': rd('avg_second_half_score'),
+        'overtime_score': rd('avg_overtime_score'),
+        'win_rate': rd('win_rate'),
+        'score_for': rd('avg_score_for'),
+        'score_against': rd('avg_score_against'),
         'window_size': 20,
       };
     }
@@ -730,13 +784,30 @@ class CompleteDataExporter {
       }
       final teammateActivityInsights = {'top_day_hour_combinations': topT};
       final recentAggT = await db.rawQuery('''
-          SELECT COUNT(*) as matches, AVG(kills) as avg_kills, AVG(deaths) as avg_deaths, AVG(assists) as avg_assists, AVG(adr) as avg_adr,
-                 AVG(kr_ratio) as avg_kr_ratio, AVG(kd_ratio) as avg_kd_ratio, AVG(headshots) as avg_headshots, AVG(headshots_percentage) as avg_headshots_percentage,
-                 AVG(mvps) as avg_mvps, AVG(entry_count) as avg_entry_count, AVG(entry_wins) as avg_entry_wins, AVG(clutch_kills) as avg_clutch_kills,
-                 AVG(sniper_kills) as avg_sniper_kills, AVG(flash_count) as avg_flash_count, AVG(flash_successes) as avg_flash_successes,
-                 AVG(utility_damage) as avg_utility_damage, AVG(utility_usage_per_round) as avg_utility_usage_per_round, AVG(utility_damage_per_round) as avg_utility_damage_per_round,
-                 AVG(enemies_flashed) as avg_enemies_flashed
-          FROM recent_player_match_stats WHERE player_id = ? ORDER BY created_at DESC LIMIT 20
+          SELECT COUNT(*) as matches,
+                 AVG(kills) as avg_kills,
+                 AVG(deaths) as avg_deaths,
+                 AVG(assists) as avg_assists,
+                 AVG(adr) as avg_adr,
+                 AVG(kr_ratio) as avg_kr_ratio,
+                 AVG(kd_ratio) as avg_kd_ratio,
+                 AVG(headshots) as avg_headshots,
+                 AVG(headshots_percentage) as avg_headshots_percentage,
+                 AVG(mvps) as avg_mvps,
+                 AVG(double_kills) as avg_double_kills,
+                 AVG(triple_kills) as avg_triple_kills,
+                 AVG(quadro_kills) as avg_quadro_kills,
+                 AVG(penta_kills) as avg_penta_kills,
+                 AVG(rounds) as avg_rounds,
+                 AVG(first_half_score) as avg_first_half_score,
+                 AVG(second_half_score) as avg_second_half_score,
+                 AVG(overtime_score) as avg_overtime_score,
+                 SUM(CASE WHEN result = 1 THEN 1 ELSE 0 END) * 1.0 / COUNT(*) as win_rate,
+                 AVG(score_for) as avg_score_for,
+                 AVG(score_against) as avg_score_against
+          FROM (
+            SELECT * FROM recent_player_match_stats WHERE player_id = ? ORDER BY created_at DESC LIMIT 20
+          ) sub
         ''', [tid]);
       Map<String, dynamic>? recentAvgT;
       if (recentAggT.isNotEmpty &&
@@ -760,16 +831,17 @@ class CompleteDataExporter {
           'headshots': rd('avg_headshots'),
           'headshots_percentage': rd('avg_headshots_percentage'),
           'mvps': rd('avg_mvps'),
-          'entry_count': rd('avg_entry_count'),
-          'entry_wins': rd('avg_entry_wins'),
-          'clutch_kills': rd('avg_clutch_kills'),
-          'sniper_kills': rd('avg_sniper_kills'),
-          'flash_count': rd('avg_flash_count'),
-          'flash_successes': rd('avg_flash_successes'),
-          'utility_damage': rd('avg_utility_damage'),
-          'utility_usage_per_round': rd('avg_utility_usage_per_round'),
-          'utility_damage_per_round': rd('avg_utility_damage_per_round'),
-          'enemies_flashed': rd('avg_enemies_flashed'),
+          'double_kills': rd('avg_double_kills'),
+          'triple_kills': rd('avg_triple_kills'),
+          'quadro_kills': rd('avg_quadro_kills'),
+          'penta_kills': rd('avg_penta_kills'),
+          'rounds': rd('avg_rounds'),
+          'first_half_score': rd('avg_first_half_score'),
+          'second_half_score': rd('avg_second_half_score'),
+          'overtime_score': rd('avg_overtime_score'),
+          'win_rate': rd('win_rate'),
+          'score_for': rd('avg_score_for'),
+          'score_against': rd('avg_score_against'),
           'window_size': 20,
         };
       }
