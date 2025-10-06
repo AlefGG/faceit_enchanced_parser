@@ -32,6 +32,9 @@ Future<void> collectData() async {
         await fetchPlayerMatches(playerId, player['nickname'].toString());
     logger.i('Fetched $fetched matches for $playerId');
 
+    // 2b) Детальные статы по последним 20 матчам
+    await fetchAndStoreRecentMatchDetailedStats(playerId);
+
     // Построение активности по часам и дням недели
     await computeAndStorePlayerActivity(playerId);
 
@@ -54,16 +57,121 @@ Future<void> collectData() async {
   await saveProgress(startPlayerIndex + processedCount);
 }
 
+// Получаем детальные статы последних 20 матчей игрока и сохраняем агрегируемые поля
+Future<void> fetchAndStoreRecentMatchDetailedStats(String playerId) async {
+  try {
+    // Получаем ID последних 20 матчей (по времени завершения/старта)
+    final matchRows = await db.rawQuery('''
+      SELECT m.match_id
+      FROM matches m
+      JOIN player_matches pm ON pm.match_id = m.match_id
+      WHERE pm.player_id = ?
+      ORDER BY COALESCE(m.finished_at, m.date) DESC
+      LIMIT 20
+    ''', [playerId]);
+
+    if (matchRows.isEmpty) return;
+
+    for (final row in matchRows) {
+      final matchId = row['match_id'] as String;
+      // Проверяем, не сохранили ли уже статы по этому матчу
+      final existing = await db.query('recent_player_match_stats',
+          where: 'match_id = ? AND player_id = ?',
+          whereArgs: [matchId, playerId]);
+      if (existing.isNotEmpty) continue;
+
+      final url = 'https://open.faceit.com/data/v4/matches/$matchId/stats';
+      final response = await reliableHttpGet(Uri.parse(url),
+          headers: {
+            'Authorization': 'Bearer $apiKey',
+          },
+          logger: logger);
+      if (response.statusCode != 200) {
+        logger.w(
+            'Failed detailed stats for match $matchId: ${response.statusCode}');
+        continue;
+      }
+      final data = jsonDecode(response.body);
+      final rounds = data['rounds'];
+      if (rounds is! List || rounds.isEmpty) continue;
+      final firstRound = rounds.first;
+      final teams = firstRound['teams'];
+      if (teams is! List) continue;
+      // Ищем игрока
+      Map<String, dynamic>? playerObj;
+      for (final t in teams) {
+        if (t is Map && t['players'] is List) {
+          for (final pl in t['players']) {
+            if (pl is Map && pl['player_id'] == playerId) {
+              playerObj = pl.cast<String, dynamic>();
+              break;
+            }
+          }
+        }
+        if (playerObj != null) break;
+      }
+      if (playerObj == null) continue;
+      final stats =
+          (playerObj['player_stats'] as Map?)?.cast<String, dynamic>() ?? {};
+
+      int? toInt(String key) => int.tryParse((stats[key] ?? '').toString());
+      double? toDouble(String key) {
+        final v = (stats[key] ?? '').toString();
+        if (v.isEmpty) return null;
+        return double.tryParse(v.replaceAll(',', '.'));
+      }
+
+      double? parsePercentDouble(String key) {
+        final v = (stats[key] ?? '').toString().replaceAll('%', '');
+        return double.tryParse(v.replaceAll(',', '.'));
+      }
+
+      await db.insert(
+          'recent_player_match_stats',
+          {
+            'match_id': matchId,
+            'player_id': playerId,
+            'kills': toInt('Kills'),
+            'deaths': toInt('Deaths'),
+            'assists': toInt('Assists'),
+            'adr': toDouble('ADR'),
+            'kr_ratio': toDouble('K/R Ratio'),
+            'kd_ratio': toDouble('K/D Ratio'),
+            'headshots': toInt('Headshots'),
+            'headshots_percentage': parsePercentDouble('Headshots %') ??
+                parsePercentDouble('Headshots %'),
+            'mvps': toInt('MVPs'),
+            'entry_count': toInt('Entry Count'),
+            'entry_wins': toInt('Entry Wins'),
+            'clutch_kills': toInt('Clutch Kills'),
+            'sniper_kills': toInt('Sniper Kills'),
+            'flash_count': toInt('Flash Count'),
+            'flash_successes': toInt('Flash Successes'),
+            'utility_damage': toInt('Utility Damage'),
+            'utility_usage_per_round': toDouble('Utility Usage per Round'),
+            'utility_damage_per_round':
+                toDouble('Utility Damage per Round in a Match'),
+            'enemies_flashed': toInt('Enemies Flashed'),
+          },
+          conflictAlgorithm: ConflictAlgorithm.replace);
+
+      await Future.delayed(Duration(milliseconds: REQUEST_DELAY));
+    }
+  } catch (e) {
+    logger.e('Error fetching recent detailed match stats for $playerId: $e');
+  }
+}
+
 // Строим активность по часам (0..23 UTC) и дням недели (1..7) за последние 300 матчей
 Future<void> computeAndStorePlayerActivity(String playerId) async {
   // Берем последние ACTIVITY_MATCH_WINDOW матчей игрока (по времени завершения или старту)
   final recentMatches = await db.rawQuery('''
     SELECT 
-      COALESCE(m.finished_at, m.started_at) AS ts
+      COALESCE(m.finished_at, m.date) AS ts
     FROM player_matches pm
     JOIN matches m ON m.match_id = pm.match_id
     WHERE pm.player_id = ?
-    ORDER BY COALESCE(m.finished_at, m.started_at) DESC
+    ORDER BY COALESCE(m.finished_at, m.date) DESC
     LIMIT ?
   ''', [playerId, ACTIVITY_MATCH_WINDOW]);
 
@@ -262,6 +370,16 @@ Future<int> fetchPlayerMatches(String playerId, String playerName) async {
           for (final match in matches) {
             final matchId = match['match_id'];
 
+            // Пропускаем матчи, если competition_type != 'matchmaking' (например championship)
+            final competitionType =
+                (match['competition_type'] ?? '').toString();
+            if (competitionType.isNotEmpty &&
+                competitionType != 'matchmaking') {
+              logger.d(
+                  'Skip non-matchmaking match $matchId type=$competitionType');
+              continue;
+            }
+
             // Фильтруем только 5v5
             final gameMode = (match['game_mode'] ?? '').toString();
             if (gameMode != '5v5') {
@@ -291,6 +409,8 @@ Future<int> fetchPlayerMatches(String playerId, String playerName) async {
                     ? int.parse(
                         match['results']['score']['faction2'].toString())
                     : 0,
+                'competition_type':
+                    competitionType.isNotEmpty ? competitionType : null,
               });
             }
 

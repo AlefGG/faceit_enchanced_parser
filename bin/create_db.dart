@@ -241,6 +241,7 @@ Future<void> createDb(Database db, int version) async {
   await ensureColumn('matches', 'finished_at', 'INTEGER');
   await ensureColumn('matches', 'score_faction1', 'INTEGER');
   await ensureColumn('matches', 'score_faction2', 'INTEGER');
+  await ensureColumn('matches', 'competition_type', 'TEXT');
 
   // Ensure required columns exist in player_matches
   await ensureColumn('player_matches', 'team', 'TEXT');
@@ -256,6 +257,7 @@ Future<void> createDb(Database db, int version) async {
       player_id TEXT NOT NULL,
       hour INTEGER NOT NULL, -- 0..23 UTC
       matches_count INTEGER NOT NULL,
+      window_size INTEGER,
       PRIMARY KEY (player_id, hour),
       FOREIGN KEY (player_id) REFERENCES players(player_id) ON DELETE CASCADE
     )
@@ -265,7 +267,43 @@ Future<void> createDb(Database db, int version) async {
       player_id TEXT NOT NULL,
       weekday INTEGER NOT NULL, -- 1..7 (Mon..Sun) UTC
       matches_count INTEGER NOT NULL,
+      window_size INTEGER,
       PRIMARY KEY (player_id, weekday),
+      FOREIGN KEY (player_id) REFERENCES players(player_id) ON DELETE CASCADE
+    )
+  ''');
+
+  // Migration: ensure window_size columns exist for activity tables
+  await ensureColumn('player_activity_hours', 'window_size', 'INTEGER');
+  await ensureColumn('player_activity_weekdays', 'window_size', 'INTEGER');
+
+  // Таблица для детальной статистики последних матчей (используется для окна 20 матчей)
+  await db.execute('''
+    CREATE TABLE IF NOT EXISTS recent_player_match_stats (
+      match_id TEXT NOT NULL,
+      player_id TEXT NOT NULL,
+      kills INTEGER,
+      deaths INTEGER,
+      assists INTEGER,
+      adr REAL,
+      kr_ratio REAL,
+      kd_ratio REAL,
+      headshots INTEGER,
+      headshots_percentage REAL,
+      mvps INTEGER,
+      entry_count INTEGER,
+      entry_wins INTEGER,
+      clutch_kills INTEGER,
+      sniper_kills INTEGER,
+      flash_count INTEGER,
+      flash_successes INTEGER,
+      utility_damage INTEGER,
+      utility_usage_per_round REAL,
+      utility_damage_per_round REAL,
+      enemies_flashed INTEGER,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY (match_id, player_id),
+      FOREIGN KEY (match_id) REFERENCES matches(match_id) ON DELETE CASCADE,
       FOREIGN KEY (player_id) REFERENCES players(player_id) ON DELETE CASCADE
     )
   ''');
