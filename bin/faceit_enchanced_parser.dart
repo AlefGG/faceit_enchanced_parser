@@ -25,6 +25,9 @@ final int MATCHES_PER_PLAYER = 300;
 final int REQUEST_DELAY = 150; // мс
 final int DB_REQUEST_DELAY = 0; // мс
 
+const int ACTIVITY_MATCH_WINDOW =
+    20; // окно для активности и инсайтов (последние N матчей)
+
 // Кэш уже загруженной статистики за текущий запуск, чтобы не делать лишних запросов
 final Set<String> loadedStats = <String>{};
 
@@ -99,8 +102,7 @@ void main(List<String> arguments) async {
     // Получаем параметры диапазона
     // startPlayerIndex = int.parse(results['start']);
     // endPlayerIndex = int.parse(results['end']);
-    startPlayerIndex = 0;
-    endPlayerIndex = 100;
+
     // Проверка валидности диапазона
     if (startPlayerIndex < 0 || endPlayerIndex <= startPlayerIndex) {
       throw ArgumentError(

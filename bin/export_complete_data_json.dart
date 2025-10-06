@@ -49,28 +49,35 @@ Future<void> exportCompleteDataToJson(
     player['map_stats'] = List<Map<String, dynamic>>.from(
         mapStatsResult.map((row) => Map<String, dynamic>.from(row)));
 
-    // Активность игрока по часам (0..23 UTC) и дням недели (1..7, Mon..Sun)
+    // Активность игрока: пересчитываем on-the-fly по последним 20 матчам (UTC)
+    final recentMatchesForActivity = await db.rawQuery('''
+      SELECT COALESCE(m.finished_at, m.date) AS ts
+      FROM matches m
+      JOIN player_matches pm ON pm.match_id = m.match_id
+      WHERE pm.player_id = ?
+      ORDER BY COALESCE(m.finished_at, m.date) DESC
+      LIMIT 20
+    ''', [playerId]);
+
     final hoursArr = List<int>.filled(24, 0);
-    final hoursResult = await db.rawQuery('''
-      SELECT hour, matches_count FROM player_activity_hours WHERE player_id = ?
-    ''', [playerId]);
-    for (final row in hoursResult) {
-      final h = (row['hour'] as int?) ?? 0;
-      final c = (row['matches_count'] as int?) ?? 0;
-      if (h >= 0 && h < 24) hoursArr[h] = c;
+    final weekdaysArr = List<int>.filled(7, 0); // Mon=1..Sun=7 => idx 0..6
+    for (final row in recentMatchesForActivity) {
+      final ts = row['ts'];
+      if (ts == null) continue;
+      int epoch;
+      if (ts is int) {
+        epoch = ts;
+      } else if (ts is BigInt) {
+        epoch = ts.toInt();
+      } else {
+        continue;
+      }
+      if (epoch == 0) continue;
+      final dt = DateTime.fromMillisecondsSinceEpoch(epoch * 1000, isUtc: true);
+      hoursArr[dt.hour] += 1;
+      weekdaysArr[dt.weekday - 1] += 1;
     }
-
-    final weekdaysArr = List<int>.filled(7, 0); // 0..6 => Mon..Sun
-    final weekdaysResult = await db.rawQuery('''
-      SELECT weekday, matches_count FROM player_activity_weekdays WHERE player_id = ?
-    ''', [playerId]);
-    for (final row in weekdaysResult) {
-      final wd = (row['weekday'] as int?) ?? 0; // 1..7 Mon..Sun
-      final c = (row['matches_count'] as int?) ?? 0;
-      if (wd >= 1 && wd <= 7) weekdaysArr[wd - 1] = c;
-    }
-
-    final totalActivity = hoursArr.fold<int>(0, (a, b) => a + b);
+    final totalActivity = recentMatchesForActivity.length;
 
     // Мапы для удобства потребления: часы как строки "0".."23", дни как названия
     final hourlyDistribution = <String, int>{
@@ -93,6 +100,7 @@ Future<void> exportCompleteDataToJson(
       'total_activity_matches': totalActivity,
       'hourly_distribution': hourlyDistribution,
       'daily_distribution': dailyDistribution,
+      'activity_window_matches': 20,
     };
 
     // Insights: топ-3 пика активности по комбинациям (день недели, час)
@@ -138,7 +146,6 @@ Future<void> exportCompleteDataToJson(
       final ca = a['matches_count'] as int;
       final cb = b['matches_count'] as int;
       if (cb != ca) return cb.compareTo(ca); // по убыванию
-      // детерминированные тай-брейки: день затем час
       final da = a['day'] as String;
       final dbs = b['day'] as String;
       final cmpDay = da.compareTo(dbs);
@@ -146,65 +153,15 @@ Future<void> exportCompleteDataToJson(
       return (a['hour'] as int).compareTo(b['hour'] as int);
     });
 
-    final top3 = <Map<String, dynamic>>[];
-    for (var i = 0; i < combos.length && i < 3; i++) {
+    final topDayHour = <Map<String, dynamic>>[];
+    for (var i = 0; i < combos.length && i < 10; i++) {
       final item = Map<String, dynamic>.from(combos[i]);
       item['rank'] = i + 1;
-      top3.add(item);
-    }
-
-    // Топ-3 пика активности по 3-часовым окнам (день недели, окно из трёх часов внутри дня)
-    // Подготовим массивы [7][24] по дням/часам
-    final List<List<int>> dayHourArray =
-        List.generate(7, (_) => List<int>.filled(24, 0));
-    for (var wd = 1; wd <= 7; wd++) {
-      final m = dayHourCounts[wd] ?? const {};
-      for (var h = 0; h < 24; h++) {
-        dayHourArray[wd - 1][h] = m[h] ?? 0;
-      }
-    }
-
-    final combos3h = <Map<String, dynamic>>[];
-    for (var wdIdx = 0; wdIdx < 7; wdIdx++) {
-      for (var start = 0; start <= 21; start++) {
-        final sum = dayHourArray[wdIdx][start] +
-            dayHourArray[wdIdx][start + 1] +
-            dayHourArray[wdIdx][start + 2];
-        if (sum > 0) {
-          final endExclusive = start + 3; // полузакрытый интервал [start, end)
-          combos3h.add({
-            'day': weekdayNames[wdIdx],
-            'start_hour': start,
-            'end_hour': endExclusive, // end exclusive для ясности
-            'window_label':
-                '${start.toString().padLeft(2, '0')}-${(endExclusive % 24).toString().padLeft(2, '0')}',
-            'matches_count': sum,
-          });
-        }
-      }
-    }
-
-    combos3h.sort((a, b) {
-      final ca = a['matches_count'] as int;
-      final cb = b['matches_count'] as int;
-      if (cb != ca) return cb.compareTo(ca);
-      final da = a['day'] as String;
-      final dbs = b['day'] as String;
-      final cmpDay = da.compareTo(dbs);
-      if (cmpDay != 0) return cmpDay;
-      return (a['start_hour'] as int).compareTo(b['start_hour'] as int);
-    });
-
-    final top3windows = <Map<String, dynamic>>[];
-    for (var i = 0; i < combos3h.length && i < 3; i++) {
-      final item = Map<String, dynamic>.from(combos3h[i]);
-      item['rank'] = i + 1;
-      top3windows.add(item);
+      topDayHour.add(item);
     }
 
     player['activity_insights'] = {
-      'top_day_hour_combinations': top3,
-      'top_day_3hour_windows': top3windows,
+      'top_day_hour_combinations': topDayHour,
     };
 
     // Получаем тиммейтов с их статистикой

@@ -56,55 +56,73 @@ Future<void> collectData() async {
 
 // Строим активность по часам (0..23 UTC) и дням недели (1..7) за последние 300 матчей
 Future<void> computeAndStorePlayerActivity(String playerId) async {
-  // Берем последние 300 матчей по дате
-  final matches = await db.rawQuery('''
-    SELECT m.date as started_at, m.finished_at as finished_at
-    FROM matches m
-    JOIN player_matches pm ON pm.match_id = m.match_id
+  // Берем последние ACTIVITY_MATCH_WINDOW матчей игрока (по времени завершения или старту)
+  final recentMatches = await db.rawQuery('''
+    SELECT 
+      COALESCE(m.finished_at, m.started_at) AS ts
+    FROM player_matches pm
+    JOIN matches m ON m.match_id = pm.match_id
     WHERE pm.player_id = ?
-    ORDER BY m.date DESC
-    LIMIT 300
-  ''', [playerId]);
+    ORDER BY COALESCE(m.finished_at, m.started_at) DESC
+    LIMIT ?
+  ''', [playerId, ACTIVITY_MATCH_WINDOW]);
 
-  if (matches.isEmpty) return;
+  // Инициализация гистограмм
+  final hours = List<int>.filled(24, 0);
+  final weekdays = List<int>.filled(7, 0); // Mon=1..Sun=7 => индексы 0..6
 
-  // Инициализируем гистограммы
-  final Map<int, int> hours = {for (var h = 0; h < 24; h++) h: 0};
-  final Map<int, int> weekdays = {for (var d = 1; d <= 7; d++) d: 0};
-
-  for (final m in matches) {
-    final int ts = (m['finished_at'] as int?) ?? (m['started_at'] as int?) ?? 0;
-    if (ts == 0) continue;
-    final dt = DateTime.fromMillisecondsSinceEpoch(ts * 1000, isUtc: true);
-    hours[dt.hour] = (hours[dt.hour] ?? 0) + 1;
-    weekdays[dt.weekday] = (weekdays[dt.weekday] ?? 0) + 1;
+  for (final row in recentMatches) {
+    final ts = row['ts'];
+    if (ts == null) continue;
+    // В БД храним как INTEGER (unix epoch секунд) или миллисекунд? Предположим секунд.
+    int epoch = 0;
+    if (ts is int) {
+      epoch = ts;
+    } else if (ts is BigInt) {
+      epoch = ts.toInt();
+    } else {
+      continue;
+    }
+    final dt = DateTime.fromMillisecondsSinceEpoch(epoch * 1000, isUtc: true);
+    hours[dt.hour] += 1;
+    final wd = dt.weekday; // 1..7
+    weekdays[wd - 1] += 1;
   }
 
-  // Сохраняем в БД (upsert)
-  final batch = db.batch();
-  hours.forEach((hour, count) {
-    batch.insert(
-      'player_activity_hours',
-      {
-        'player_id': playerId,
-        'hour': hour,
-        'matches_count': count,
-      },
-      conflictAlgorithm: ConflictAlgorithm.replace,
-    );
+  // Очистка/перезапись для игрока
+  await db.transaction((txn) async {
+    await txn.delete('player_activity_hours',
+        where: 'player_id = ?', whereArgs: [playerId]);
+    await txn.delete('player_activity_weekdays',
+        where: 'player_id = ?', whereArgs: [playerId]);
+
+    final batch = txn.batch();
+    for (var h = 0; h < 24; h++) {
+      batch.insert(
+        'player_activity_hours',
+        {
+          'player_id': playerId,
+          'hour': h,
+          'matches_count': hours[h],
+          'window_size': ACTIVITY_MATCH_WINDOW,
+        },
+        conflictAlgorithm: ConflictAlgorithm.replace,
+      );
+    }
+    for (var i = 0; i < 7; i++) {
+      batch.insert(
+        'player_activity_weekdays',
+        {
+          'player_id': playerId,
+          'weekday': i + 1, // 1..7
+          'matches_count': weekdays[i],
+          'window_size': ACTIVITY_MATCH_WINDOW,
+        },
+        conflictAlgorithm: ConflictAlgorithm.replace,
+      );
+    }
+    await batch.commit(noResult: true);
   });
-  weekdays.forEach((wd, count) {
-    batch.insert(
-      'player_activity_weekdays',
-      {
-        'player_id': playerId,
-        'weekday': wd,
-        'matches_count': count,
-      },
-      conflictAlgorithm: ConflictAlgorithm.replace,
-    );
-  });
-  await batch.commit(noResult: true);
 }
 
 // Получение топ игроков с пагинацией (загружаем, только если ещё не загружали source='top')
