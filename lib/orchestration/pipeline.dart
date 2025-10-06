@@ -112,15 +112,17 @@ class Pipeline {
       logger.i(
           '[PLAYER_PROGRESS] done {idx:$indexDisplay,total:$total,percent:${percent.toStringAsFixed(1)}%,player:$nickname,$playerId,matches_ingested:$ingested,teammates:$teammateEnriched,elapsed_s:${playerElapsed.inSeconds},eta:${_fmtDur(eta)}}');
     }
-    // Export after processing batch
+    // Chunked export after processing batch (10 players per file)
     final timestamp = DateTime.now();
-    final name =
-        'faceit_complete_data_${timestamp.toIso8601String().replaceAll(':', '-')}.json';
-    await exporter.export(name, chunkSize: 10);
+    final baseName =
+        'faceit_complete_data_${timestamp.toIso8601String().replaceAll(':', '-')}';
+    final files =
+        await exporter.exportChunked(baseName: baseName, chunkSize: 10);
     final totalElapsed = DateTime.now().difference(pipelineStart);
     final avgMs =
         processed == 0 ? 0 : (totalElapsed.inMilliseconds / processed).round();
-    logger.i('Pipeline completed for $processed players. Export: $name');
+    logger.i(
+        'Pipeline completed for $processed players. Exported chunk files: ${files.join(', ')}');
     logger.i(
         '[PIPELINE_SUMMARY] total_elapsed:${_fmtDur(totalElapsed)} total_s:${totalElapsed.inSeconds} avg_per_player_ms:$avgMs');
   }

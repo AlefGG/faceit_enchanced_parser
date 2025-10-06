@@ -17,7 +17,7 @@ Future<void> main(List<String> args) async {
     ..addOption('start',
         abbr: 's', defaultsTo: '0', help: 'Start player index (inclusive)')
     ..addOption('end',
-        abbr: 'e', defaultsTo: '70', help: 'End player index (exclusive)')
+        abbr: 'e', defaultsTo: '12', help: 'End player index (exclusive)')
     ..addOption('db',
         defaultsTo: 'faceit_stats.db', help: 'SQLite database file name')
     ..addFlag('help', abbr: 'h', negatable: false, help: 'Show help');
