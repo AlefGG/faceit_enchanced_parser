@@ -1,4 +1,4 @@
-library faceit_enchanced_parser;
+library faceit_ecnhanced_parser; // matches pubspec name (typo preserved in package name)
 
 export 'core/config.dart';
 export 'db/database.dart';

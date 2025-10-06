@@ -21,6 +21,11 @@ class Pipeline {
   final FaceitApi api;
   Pipeline({required this.db, required this.logger, required this.api});
 
+  // In-memory caches to skip duplicate work during a single run
+  final Set<String> _statsFetched = <String>{};
+  final Set<String> _recentFetched = <String>{};
+  final Set<String> _activityComputed = <String>{};
+
   Future<void> run(int startIndex, int endIndex) async {
     final playerRepo = PlayerRepository(db);
     final matchRepo = MatchRepository(db);
@@ -64,12 +69,18 @@ class Pipeline {
       final percent = total == 0 ? 0 : ((indexDisplay / total) * 100);
       logger.i(
           '[PLAYER_PROGRESS] start {idx:$indexDisplay,total:$total,percent:${percent.toStringAsFixed(1)}%,player:$nickname,$playerId}');
-      await statsFetcher.fetchIfNeeded(playerId, debugName: nickname);
+      if (_statsFetched.add(playerId)) {
+        await statsFetcher.fetchIfNeeded(playerId, debugName: nickname);
+      }
       final ingested = await matchesIngestor.ingestMatches(playerId, nickname,
           target: AppConfig.matchesPerPlayer);
-      await recentFetcher.fetchRecent(playerId,
-          limit: AppConfig.activityMatchWindow);
-      await activityCalc.recompute(playerId, AppConfig.activityMatchWindow);
+      if (_recentFetched.add(playerId)) {
+        await recentFetcher.fetchRecent(playerId,
+            limit: AppConfig.activityMatchWindow);
+      }
+      if (_activityComputed.add(playerId)) {
+        await activityCalc.recompute(playerId, AppConfig.activityMatchWindow);
+      }
       await playerRepo.markProcessed(playerId);
       // Teammates (after matches ingested)
       await teammatesProcessor.process(db, playerId,
@@ -80,10 +91,13 @@ class Pipeline {
       int teammateEnriched = 0;
       for (final row in teammateIds) {
         final tid = row['teammate_id'] as String;
-        // Recent detailed stats (skip if already have some recent rows)
-        await recentFetcher.fetchRecent(tid,
-            limit: AppConfig.activityMatchWindow);
-        await activityCalc.recompute(tid, AppConfig.activityMatchWindow);
+        if (_recentFetched.add(tid)) {
+          await recentFetcher.fetchRecent(tid,
+              limit: AppConfig.activityMatchWindow);
+        }
+        if (_activityComputed.add(tid)) {
+          await activityCalc.recompute(tid, AppConfig.activityMatchWindow);
+        }
         teammateEnriched++;
       }
       processed++;

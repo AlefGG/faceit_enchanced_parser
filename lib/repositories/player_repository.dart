@@ -34,6 +34,13 @@ class PlayerRepository {
         where: 'player_id = ?', whereArgs: [playerId]);
   }
 
+  Future<Map<String, dynamic>?> getPlayer(String playerId) async {
+    final rows = await db.query('players',
+        where: 'player_id = ?', whereArgs: [playerId], limit: 1);
+    if (rows.isEmpty) return null;
+    return rows.first;
+  }
+
   Future<void> upsertDiscovered(Map<String, Object?> data) async {
     await db.insert('players', data,
         conflictAlgorithm: ConflictAlgorithm.ignore);
