@@ -54,11 +54,18 @@ class Pipeline {
     final players =
         await playerRepo.fetchUnprocessedTopRange(limit, startIndex);
     int processed = 0;
+    final total = players.length;
+    final pipelineStart = DateTime.now();
     for (final p in players) {
+      final playerStart = DateTime.now();
       final playerId = p['player_id'] as String;
       final nickname = (p['nickname'] ?? '') as String;
+      final indexDisplay = processed + 1; // 1-based
+      final percent = total == 0 ? 0 : ((indexDisplay / total) * 100);
+      logger.i(
+          '[PLAYER_PROGRESS] start {idx:$indexDisplay,total:$total,percent:${percent.toStringAsFixed(1)}%,player:$nickname,$playerId}');
       await statsFetcher.fetchIfNeeded(playerId, debugName: nickname);
-      await matchesIngestor.ingestMatches(playerId, nickname,
+      final ingested = await matchesIngestor.ingestMatches(playerId, nickname,
           target: AppConfig.matchesPerPlayer);
       await recentFetcher.fetchRecent(playerId,
           limit: AppConfig.activityMatchWindow);
@@ -70,20 +77,45 @@ class Pipeline {
       // Fetch recent stats + activity for each teammate (limit 20) to enrich export
       final teammateIds = await db.rawQuery(
           'SELECT teammate_id FROM teammates WHERE player_id = ?', [playerId]);
+      int teammateEnriched = 0;
       for (final row in teammateIds) {
         final tid = row['teammate_id'] as String;
         // Recent detailed stats (skip if already have some recent rows)
         await recentFetcher.fetchRecent(tid,
             limit: AppConfig.activityMatchWindow);
         await activityCalc.recompute(tid, AppConfig.activityMatchWindow);
+        teammateEnriched++;
       }
       processed++;
+      final playerElapsed = DateTime.now().difference(playerStart);
+      final elapsedTotal = DateTime.now().difference(pipelineStart);
+      final avgPerPlayerMs = processed == 0
+          ? 0
+          : (elapsedTotal.inMilliseconds / processed).round();
+      final remainingPlayers = total - processed;
+      final estRemainingMs = remainingPlayers * avgPerPlayerMs;
+      final eta = Duration(milliseconds: estRemainingMs);
+      logger.i(
+          '[PLAYER_PROGRESS] done {idx:$indexDisplay,total:$total,percent:${percent.toStringAsFixed(1)}%,player:$nickname,$playerId,matches_ingested:$ingested,teammates:$teammateEnriched,elapsed_s:${playerElapsed.inSeconds},eta:${_fmtDur(eta)}}');
     }
     // Export after processing batch
     final timestamp = DateTime.now();
     final name =
         'faceit_complete_data_${timestamp.toIso8601String().replaceAll(':', '-')}.json';
     await exporter.export(name);
+    final totalElapsed = DateTime.now().difference(pipelineStart);
+    final avgMs =
+        processed == 0 ? 0 : (totalElapsed.inMilliseconds / processed).round();
     logger.i('Pipeline completed for $processed players. Export: $name');
+    logger.i(
+        '[PIPELINE_SUMMARY] total_elapsed:${_fmtDur(totalElapsed)} total_s:${totalElapsed.inSeconds} avg_per_player_ms:$avgMs');
   }
+}
+
+String _fmtDur(Duration d) {
+  String two(int v) => v.toString().padLeft(2, '0');
+  final h = d.inHours;
+  final m = d.inMinutes.remainder(60);
+  final s = d.inSeconds.remainder(60);
+  return '${two(h)}:${two(m)}:${two(s)}';
 }
