@@ -67,6 +67,16 @@ class Pipeline {
       // Teammates (after matches ingested)
       await teammatesProcessor.process(db, playerId,
           minMatches: AppConfig.minTeammateMatches);
+      // Fetch recent stats + activity for each teammate (limit 20) to enrich export
+      final teammateIds = await db.rawQuery(
+          'SELECT teammate_id FROM teammates WHERE player_id = ?', [playerId]);
+      for (final row in teammateIds) {
+        final tid = row['teammate_id'] as String;
+        // Recent detailed stats (skip if already have some recent rows)
+        await recentFetcher.fetchRecent(tid,
+            limit: AppConfig.activityMatchWindow);
+        await activityCalc.recompute(tid, AppConfig.activityMatchWindow);
+      }
       processed++;
     }
     // Export after processing batch
