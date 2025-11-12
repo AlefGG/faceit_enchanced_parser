@@ -54,10 +54,9 @@ class Pipeline {
         logger: logger);
     final exporter = CompleteDataExporter(db: db, logger: logger);
 
-    final limit = endIndex - startIndex;
     await topIngestor.ensureTopPlayers(endIndex);
     final players =
-        await playerRepo.fetchUnprocessedTopRange(limit, startIndex);
+        await playerRepo.fetchUnprocessedTopSlice(startIndex, endIndex);
     int processed = 0;
     final total = players.length;
     final pipelineStart = DateTime.now();

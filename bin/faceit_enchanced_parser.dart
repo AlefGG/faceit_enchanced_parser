@@ -17,7 +17,7 @@ Future<void> main(List<String> args) async {
     ..addOption('start',
         abbr: 's', defaultsTo: '0', help: 'Start player index (inclusive)')
     ..addOption('end',
-        abbr: 'e', defaultsTo: '12', help: 'End player index (exclusive)')
+        abbr: 'e', defaultsTo: '100', help: 'End player index (exclusive)')
     ..addOption('db',
         defaultsTo: 'faceit_stats.db', help: 'SQLite database file name')
     ..addFlag('help', abbr: 'h', negatable: false, help: 'Show help');
@@ -49,22 +49,23 @@ Future<void> main(List<String> args) async {
     exit(64);
   }
 
-  // Load env (.env.faceit) for API key
+  // Load env (.env.faceit) for API key(s)
   final env = DotEnv()..load(['.env.faceit']);
-  final apiKey = env['FACEIT_API_KEY'] ?? '';
-  if (apiKey.isEmpty) {
-    stderr.writeln('FACEIT_API_KEY missing in .env.faceit');
+  final tokens = _collectFaceitTokens(env);
+  if (tokens.isEmpty) {
+    stderr.writeln('No FACEIT_API_KEY* entries found in .env.faceit');
     exit(1);
   }
+  logger.i('Loaded ${tokens.length} FACEIT API token(s)');
 
   logger.i('Starting pipeline for players range [$start, $end)');
 
   try {
     final db = await AppDatabase.open(fileName: dbFile);
-    final http = HttpClientWrapper(logger: logger, defaultHeaders: {
-      'Authorization': 'Bearer $apiKey',
-      'Accept': 'application/json'
-    });
+    final http = HttpClientWrapper(
+        logger: logger,
+        defaultHeaders: {'Accept': 'application/json'},
+        bearerTokens: tokens);
     final api = FaceitApi(http: http, logger: logger);
     final pipeline = Pipeline(db: db, logger: logger, api: api);
     await pipeline.run(start, end);
@@ -74,4 +75,49 @@ Future<void> main(List<String> args) async {
     logger.e('Fatal pipeline error', error: e, stackTrace: st);
     exit(1);
   }
+}
+
+List<String> _collectFaceitTokens(DotEnv env) {
+  final entries = <MapEntry<String, String>>[];
+
+  final envFile = File('.env.faceit');
+  if (envFile.existsSync()) {
+    for (final rawLine in envFile.readAsLinesSync()) {
+      final line = rawLine.trim();
+      if (line.isEmpty || line.startsWith('#')) continue;
+      final idx = line.indexOf('=');
+      if (idx <= 0) continue;
+      final key = line.substring(0, idx).trim();
+      final value = line.substring(idx + 1).trim();
+      if (key.toUpperCase().startsWith('FACEIT_API_KEY') && value.isNotEmpty) {
+        entries.add(MapEntry(key, value));
+      }
+    }
+  }
+
+  // Also include values already loaded into the DotEnv instance (covers runtime overrides)
+  const fallbackKeys = [
+    'FACEIT_API_KEY',
+    'FACEIT_API_KEY_ONE',
+    'FACEIT_API_KEY_TWO',
+    'FACEIT_API_KEY_THREE',
+    'FACEIT_API_KEY_FOUR',
+    'FACEIT_API_KEY_FIVE',
+  ];
+  for (final key in fallbackKeys) {
+    final value = env[key];
+    if (value != null && value.trim().isNotEmpty) {
+      entries.add(MapEntry(key, value.trim()));
+    }
+  }
+
+  entries.sort((a, b) => a.key.compareTo(b.key));
+  final seen = <String>{};
+  final tokens = <String>[];
+  for (final entry in entries) {
+    if (seen.add(entry.value)) {
+      tokens.add(entry.value);
+    }
+  }
+  return tokens;
 }

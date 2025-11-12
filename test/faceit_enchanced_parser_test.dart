@@ -70,30 +70,43 @@ class _MockHttpClient extends HttpClientWrapper {
             'competition_type': 'matchmaking',
             'started_at': DateTime.now().millisecondsSinceEpoch ~/ 1000,
             'finished_at': DateTime.now().millisecondsSinceEpoch ~/ 1000,
-            'teams': [
-              {
+            'teams': {
+              'faction1': {
                 'team_id': 't1',
                 'players': [
                   {
                     'player_id': 'mock_player_1',
                     'nickname': 'MockOne',
+                    'country': 'eu',
+                    'skill_level': 10,
+                    'faceit_elo': 3000,
                   },
                   {
                     'player_id': 'mock_teammate_a',
                     'nickname': 'TeammateA',
+                    'country': 'eu',
+                    'skill_level': 8,
+                    'faceit_elo': 2500,
                   }
                 ]
               },
-              {
+              'faction2': {
                 'team_id': 't2',
                 'players': [
                   {
                     'player_id': 'mock_opponent',
                     'nickname': 'Opponent',
+                    'country': 'us',
+                    'skill_level': 7,
+                    'faceit_elo': 2400,
                   }
                 ]
               }
-            ]
+            },
+            'results': {
+              'winner': 'faction1',
+              'score': {'faction1': '16', 'faction2': '10'}
+            }
           };
         })
       };

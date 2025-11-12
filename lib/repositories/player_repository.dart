@@ -22,11 +22,17 @@ class PlayerRepository {
     });
   }
 
-  Future<List<Map<String, dynamic>>> fetchUnprocessedTopRange(
-      int limit, int offset) async {
+  Future<List<Map<String, dynamic>>> fetchUnprocessedTopSlice(
+      int startRank, int endRank) async {
     return db.rawQuery('''
-      SELECT * FROM players WHERE processed = 0 AND source='top' ORDER BY rank_order LIMIT ? OFFSET ?
-    ''', [limit, offset]);
+      SELECT *
+      FROM players
+      WHERE source = 'top'
+        AND rank_order >= ?
+        AND rank_order < ?
+        AND processed = 0
+      ORDER BY rank_order
+    ''', [startRank, endRank]);
   }
 
   Future<void> markProcessed(String playerId) async {
